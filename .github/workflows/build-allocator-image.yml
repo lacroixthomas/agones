@@ -2,8 +2,7 @@ name: Build Allocator Image
 
 on:
   push:
-    branches: [main]
-  workflow_dispatch:
+    branches: [main, poc-githubactions]
 
 jobs:
   build-allocator-image:
