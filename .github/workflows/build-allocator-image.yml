@@ -29,8 +29,11 @@ jobs:
       - name: Create Kind cluster (Makefile)
         run: make -C build kind-test-cluster
 
-      - name: Build all images
-        run: make -C build build-images
+      - name: Build all images (Linux/amd64 only)
+        run: |
+          export WITH_WINDOWS=0
+          export WITH_ARM64=0
+          make -C build build-images
 
       - name: Load images into Kind
         run: make -C build kind-push
