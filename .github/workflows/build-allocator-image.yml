@@ -1,11 +1,12 @@
-name: Build Allocator Image
+name: CI Build and E2E Test
 
 on:
   push:
     branches: [main, poc-githubactions]
+  workflow_dispatch:
 
 jobs:
-  build-allocator-image:
+  build-and-e2e:
     runs-on: ubuntu-latest
     steps:
       - name: Checkout code
@@ -20,5 +21,70 @@ jobs:
       - name: Install dependencies
         run: sudo apt-get update && sudo apt-get install -y make
 
-      - name: Build allocator image
-        run: make -C build build-allocator-image
+      - name: Set up Kind cluster
+        uses: helm/kind-action@v1.9.0
+        with:
+          version: v0.20.0
+
+      - name: Create Kind cluster (Makefile)
+        run: make -C build kind-test-cluster
+
+      - name: Build all images
+        run: make -C build build-images
+
+      - name: Load images into Kind
+        run: make -C build kind-push
+
+      - name: Save Docker images as tarballs
+        run: |
+          docker save -o agones-allocator.tar local/agones-allocator:*
+          docker save -o agones-controller.tar local/agones-controller:*
+          docker save -o agones-extensions.tar local/agones-extensions:*
+          docker save -o agones-sdk.tar local/agones-sdk:*
+          docker save -o agones-ping.tar local/agones-ping:*
+          docker save -o agones-processor.tar local/agones-processor:*
+
+      - name: Upload allocator image artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: agones-allocator-image
+          path: agones-allocator.tar
+
+      - name: Upload controller image artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: agones-controller-image
+          path: agones-controller.tar
+
+      - name: Upload extensions image artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: agones-extensions-image
+          path: agones-extensions.tar
+
+      - name: Upload sdk image artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: agones-sdk-image
+          path: agones-sdk.tar
+
+      - name: Upload ping image artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: agones-ping-image
+          path: agones-ping.tar
+
+      - name: Upload processor image artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: agones-processor-image
+          path: agones-processor.tar
+
+      - name: Build Helm chart
+        run: make -C build build-chart
+
+      - name: Install Agones to Kind
+        run: make -C build kind-install
+
+      - name: Run E2E tests
+        run: make -C build kind-test-e2e
