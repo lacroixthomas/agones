@@ -29,6 +29,8 @@ import (
 	"agones.dev/agones/pkg/gameserverallocations"
 	"agones.dev/agones/pkg/gameservers"
 
+	
+	k8sruntime "k8s.io/apimachinery/pkg/runtime"
 	"github.com/heptiolabs/healthcheck"
 	"github.com/sirupsen/logrus"
 	"go.opencensus.io/plugin/ocgrpc"
@@ -42,6 +44,11 @@ import (
 	"k8s.io/client-go/kubernetes"
 )
 
+// gameServerAllocator represent the interface to allocate game servers
+type gameServerAllocator interface {
+	Allocate(ctx context.Context, gsa *allocationv1.GameServerAllocation) (k8sruntime.Object, error)
+}
+
 // allocationResult represents the result of an allocation attempt
 type allocationResult struct {
 	response *allocationpb.AllocationResponse
@@ -54,7 +61,7 @@ type processorHandler struct {
 	ctx                       context.Context
 	cancel                    context.CancelFunc
 	mu                        sync.RWMutex
-	allocator                 *gameserverallocations.Allocator
+	allocator                 gameServerAllocator
 	clients                   map[string]allocationpb.Processor_StreamBatchesServer
 	grpcUnallocatedStatusCode codes.Code
 	pullInterval              time.Duration
