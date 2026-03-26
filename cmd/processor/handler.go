@@ -29,8 +29,6 @@ import (
 	"agones.dev/agones/pkg/gameserverallocations"
 	"agones.dev/agones/pkg/gameservers"
 
-	
-	k8sruntime "k8s.io/apimachinery/pkg/runtime"
 	"github.com/heptiolabs/healthcheck"
 	"github.com/sirupsen/logrus"
 	"go.opencensus.io/plugin/ocgrpc"
@@ -40,6 +38,7 @@ import (
 	"google.golang.org/grpc/keepalive"
 	"google.golang.org/grpc/status"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
+	k8sruntime "k8s.io/apimachinery/pkg/runtime"
 	"k8s.io/client-go/informers"
 	"k8s.io/client-go/kubernetes"
 )
@@ -163,7 +162,7 @@ func (h *processorHandler) StreamBatches(stream allocationpb.Processor_StreamBat
 		}
 
 		// Submit batch for processing
-		response := h.submitBatch(batchID, requestWrappers)
+		response := h.submitBatch(stream.Context(), batchID, requestWrappers)
 
 		respMsg := &allocationpb.ProcessorMessage{
 			ClientId: clientID,
@@ -172,7 +171,6 @@ func (h *processorHandler) StreamBatches(stream allocationpb.Processor_StreamBat
 			},
 		}
 
-		// TODO: we might want to retry on failure here ?
 		if err := stream.Send(respMsg); err != nil {
 			logger.WithFields(logrus.Fields{
 				"clientID":     clientID,
@@ -220,7 +218,7 @@ func (h *processorHandler) StartPullRequestTicker() {
 }
 
 // processAllocationsConcurrently processes multiple allocation requests in parallel
-func (h *processorHandler) processAllocationsConcurrently(requestWrappers []*allocationpb.RequestWrapper) []allocationResult {
+func (h *processorHandler) processAllocationsConcurrently(ctx context.Context, requestWrappers []*allocationpb.RequestWrapper) []allocationResult {
 	var wg sync.WaitGroup
 	results := make([]allocationResult, len(requestWrappers))
 
@@ -228,7 +226,7 @@ func (h *processorHandler) processAllocationsConcurrently(requestWrappers []*all
 		wg.Add(1)
 		go func(index int, requestWrapper *allocationpb.RequestWrapper) {
 			defer wg.Done()
-			results[index] = h.processAllocation(requestWrapper.Request)
+			results[index] = h.processAllocation(ctx, requestWrapper.Request)
 		}(i, reqWrapper)
 	}
 
@@ -238,7 +236,7 @@ func (h *processorHandler) processAllocationsConcurrently(requestWrappers []*all
 }
 
 // processAllocation handles a single allocation request by using the allocator
-func (h *processorHandler) processAllocation(req *allocationpb.AllocationRequest) allocationResult {
+func (h *processorHandler) processAllocation(ctx context.Context, req *allocationpb.AllocationRequest) allocationResult {
 	gsa := converters.ConvertAllocationRequestToGSA(req)
 	gsa.ApplyDefaults()
 
@@ -254,7 +252,7 @@ func (h *processorHandler) processAllocation(req *allocationpb.AllocationRequest
 		}
 	}
 
-	resultObj, err := h.allocator.Allocate(h.ctx, gsa)
+	resultObj, err := h.allocator.Allocate(ctx, gsa)
 	if err != nil {
 		return makeError(err, h.grpcUnallocatedStatusCode)
 	}
@@ -287,8 +285,8 @@ func (h *processorHandler) processAllocation(req *allocationpb.AllocationRequest
 }
 
 // submitBatch accepts a batch of allocation requests, processes them, and assembles a batch response
-func (h *processorHandler) submitBatch(batchID string, requestWrappers []*allocationpb.RequestWrapper) *allocationpb.BatchResponse {
-	results := h.processAllocationsConcurrently(requestWrappers)
+func (h *processorHandler) submitBatch(ctx context.Context, batchID string, requestWrappers []*allocationpb.RequestWrapper) *allocationpb.BatchResponse {
+	results := h.processAllocationsConcurrently(ctx, requestWrappers)
 	responseWrappers := make([]*allocationpb.ResponseWrapper, len(requestWrappers))
 
 	for i, result := range results {

@@ -28,6 +28,7 @@ import (
 	"google.golang.org/grpc/codes"
 	"google.golang.org/grpc/status"
 	corev1 "k8s.io/api/core/v1"
+	k8serrors "k8s.io/apimachinery/pkg/api/errors"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	k8sruntime "k8s.io/apimachinery/pkg/runtime"
 	"k8s.io/apimachinery/pkg/runtime/serializer"
@@ -165,6 +166,12 @@ func (c *Extensions) processAllocationRequest(ctx context.Context, w http.Respon
 	}
 
 	if runtime.FeatureEnabled(runtime.FeatureProcessorAllocator) {
+		if errs := gsa.Validate(); len(errs) > 0 {
+			kind := allocationv1.SchemeGroupVersion.WithKind("GameServerAllocation").GroupKind()
+			statusErr := k8serrors.NewInvalid(kind, gsa.Name, errs)
+			return c.serialisation(r, w, &statusErr.ErrStatus, http.StatusUnprocessableEntity, scheme.Codecs)
+		}
+
 		req := converters.ConvertGSAToAllocationRequest(gsa)
 		resp, err := c.processorClient.Allocate(ctx, req)
 		if err != nil {
@@ -266,7 +273,7 @@ func (c *Extensions) convertProcessorError(err error, gsa *allocationv1.GameServ
 			return &metav1.Status{
 				TypeMeta: metav1.TypeMeta{Kind: "Status", APIVersion: "v1"},
 				Status:   metav1.StatusFailure,
-				Message:  err.Error(),
+				Message:  st.Message(),
 				Code:     int32(code),
 			}, code
 		}
@@ -286,6 +293,7 @@ func (c *Extensions) convertProcessorResponse(resp *pb.AllocationResponse, origi
 	resultGSA.Spec = originalGSA.Spec
 	resultGSA.ObjectMeta.Namespace = originalGSA.ObjectMeta.Namespace
 	resultGSA.ObjectMeta.Name = resp.GameServerName
+	resultGSA.ObjectMeta.CreationTimestamp = originalGSA.ObjectMeta.CreationTimestamp
 
 	return resultGSA
 }
