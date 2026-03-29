@@ -18,6 +18,7 @@ package main
 import (
 	"context"
 	"fmt"
+	"io"
 	"sync"
 	"time"
 
@@ -89,6 +90,7 @@ func newServiceHandler(ctx context.Context, kubeClient kubernetes.Interface, ago
 		allocator:                 allocator,
 		ctx:                       batchCtx,
 		cancel:                    cancel,
+		clients:                   make(map[string]allocationpb.Processor_StreamBatchesServer),
 		grpcUnallocatedStatusCode: grpcUnallocatedStatusCode,
 		pullInterval:              config.PullInterval,
 	}
@@ -118,7 +120,7 @@ func (h *processorHandler) StreamBatches(stream allocationpb.Processor_StreamBat
 	clientID = msg.GetClientId()
 	if clientID == "" {
 		logger.Warn("Received empty clientID, closing stream")
-		return nil
+		return status.Error(codes.InvalidArgument, "clientID is required")
 	}
 
 	h.addClient(clientID, stream)
@@ -129,7 +131,11 @@ func (h *processorHandler) StreamBatches(stream allocationpb.Processor_StreamBat
 	for {
 		msg, err := stream.Recv()
 		if err != nil {
-			logger.WithError(err).Debug("Stream receive error")
+			if err == io.EOF {
+				logger.WithField("clientID", clientID).Debug("Stream closed by client")
+			} else {
+				logger.WithField("clientID", clientID).WithError(err).Warn("Stream receive error")
+			}
 			return err
 		}
 
@@ -335,11 +341,6 @@ func (h *processorHandler) getGRPCServerOptions() []grpc.ServerOption {
 func (h *processorHandler) addClient(clientID string, stream allocationpb.Processor_StreamBatchesServer) {
 	h.mu.Lock()
 	defer h.mu.Unlock()
-
-	if h.clients == nil {
-		h.clients = make(map[string]allocationpb.Processor_StreamBatchesServer)
-	}
-
 	h.clients[clientID] = stream
 }
 
