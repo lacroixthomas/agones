@@ -169,7 +169,11 @@ func (c *Extensions) processAllocationRequest(ctx context.Context, w http.Respon
 		if errs := gsa.Validate(); len(errs) > 0 {
 			kind := allocationv1.SchemeGroupVersion.WithKind("GameServerAllocation").GroupKind()
 			statusErr := k8serrors.NewInvalid(kind, gsa.Name, errs)
-			return c.serialisation(r, w, &statusErr.ErrStatus, http.StatusUnprocessableEntity, scheme.Codecs)
+			s := &statusErr.ErrStatus
+			if gvks, _, err := apiserver.Scheme.ObjectKinds(s); err == nil {
+				s.TypeMeta = metav1.TypeMeta{Kind: gvks[0].Kind, APIVersion: gvks[0].Version}
+			}
+			return c.serialisation(r, w, s, http.StatusUnprocessableEntity, scheme.Codecs)
 		}
 
 		req := converters.ConvertGSAToAllocationRequest(gsa)
