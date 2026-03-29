@@ -260,7 +260,7 @@ func (h *processorHandler) processAllocation(ctx context.Context, req *allocatio
 
 	resultObj, err := h.allocator.Allocate(ctx, gsa)
 	if err != nil {
-		return makeError(err, h.grpcUnallocatedStatusCode)
+		return makeError(err, codes.Internal)
 	}
 
 	if s, ok := resultObj.(*metav1.Status); ok {
@@ -284,7 +284,7 @@ func (h *processorHandler) processAllocation(ctx context.Context, req *allocatio
 
 	response, err := converters.ConvertGSAToAllocationResponse(allocatedGsa, h.grpcUnallocatedStatusCode)
 	if err != nil {
-		return makeError(err, h.grpcUnallocatedStatusCode)
+		return makeError(err, codes.Internal)
 	}
 
 	return allocationResult{response: response}
@@ -341,6 +341,7 @@ func (h *processorHandler) getGRPCServerOptions() []grpc.ServerOption {
 func (h *processorHandler) addClient(clientID string, stream allocationpb.Processor_StreamBatchesServer) {
 	h.mu.Lock()
 	defer h.mu.Unlock()
+
 	h.clients[clientID] = stream
 }
 

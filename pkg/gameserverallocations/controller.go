@@ -293,11 +293,10 @@ func (c *Extensions) convertProcessorError(err error, gsa *allocationv1.GameServ
 
 // convertProcessorResponse handles successful processor responses
 func (c *Extensions) convertProcessorResponse(resp *pb.AllocationResponse, originalGSA *allocationv1.GameServerAllocation) k8sruntime.Object {
-	resultGSA := converters.ConvertAllocationResponseToGSA(resp, resp.Source)
-	resultGSA.Spec = originalGSA.Spec
-	resultGSA.ObjectMeta.Namespace = originalGSA.ObjectMeta.Namespace
+	resultGSA := originalGSA.DeepCopy()
+	converted := converters.ConvertAllocationResponseToGSA(resp, resp.Source)
+	resultGSA.Status = converted.Status
 	resultGSA.ObjectMeta.Name = resp.GameServerName
-	resultGSA.ObjectMeta.CreationTimestamp = originalGSA.ObjectMeta.CreationTimestamp
 
 	return resultGSA
 }

@@ -172,11 +172,35 @@ func TestProcessAllocation(t *testing.T) {
 			wantResponse: true,
 		},
 		{
+			name: "unallocated state returns ResourceExhausted",
+			allocateFunc: func(_ context.Context, _ *allocationv1.GameServerAllocation) (k8sruntime.Object, error) {
+				return &allocationv1.GameServerAllocation{
+					Status: allocationv1.GameServerAllocationStatus{
+						State: allocationv1.GameServerAllocationUnAllocated,
+					},
+				}, nil
+			},
+			wantErrorCode: codes.ResourceExhausted,
+			wantErrorMsg:  "there is no available GameServer to allocate",
+		},
+		{
+			name: "contention state returns Aborted",
+			allocateFunc: func(_ context.Context, _ *allocationv1.GameServerAllocation) (k8sruntime.Object, error) {
+				return &allocationv1.GameServerAllocation{
+					Status: allocationv1.GameServerAllocationStatus{
+						State: allocationv1.GameServerAllocationContention,
+					},
+				}, nil
+			},
+			wantErrorCode: codes.Aborted,
+			wantErrorMsg:  "too many concurrent requests have overwhelmed the system",
+		},
+		{
 			name: "allocator returns error",
 			allocateFunc: func(_ context.Context, _ *allocationv1.GameServerAllocation) (k8sruntime.Object, error) {
 				return nil, errors.New("allocation failed")
 			},
-			wantErrorCode: codes.ResourceExhausted,
+			wantErrorCode: codes.Internal,
 			wantErrorMsg:  "allocation failed",
 		},
 		{
