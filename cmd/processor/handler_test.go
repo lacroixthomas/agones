@@ -484,11 +484,11 @@ func TestStreamBatches(t *testing.T) {
 			wantClients: 0,
 		},
 		{
-			name: "empty clientID closes stream without error",
+			name: "empty clientID closes stream with InvalidArgument error",
 			messages: []*allocationpb.ProcessorMessage{
 				{ClientId: ""},
 			},
-			wantErr:     false,
+			wantErr:     true,
 			wantClients: 0,
 		},
 		{
