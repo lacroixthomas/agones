@@ -733,7 +733,7 @@ func Retry(backoff wait.Backoff, fn func() error) error {
 		switch {
 		case err == nil:
 			return true, nil
-		case goErrors.Is(err, ErrNoGameServer), goErrors.Is(err, ErrTotalTimeoutExceeded):
+		case goErrors.Is(err, ErrTotalTimeoutExceeded):
 			return true, err
 		default:
 			lastConflictErr = err
