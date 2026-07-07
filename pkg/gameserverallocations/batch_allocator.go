@@ -25,7 +25,6 @@ import (
 	"agones.dev/agones/pkg/util/runtime"
 	"github.com/pkg/errors"
 	corev1 "k8s.io/api/core/v1"
-	k8serrors "k8s.io/apimachinery/pkg/api/errors"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 )
 
@@ -53,9 +52,7 @@ func (c *Allocator) batchAllocationUpdateWorkers(ctx context.Context, workerCoun
 						var propagatedErr error
 						updatedGs, updateErr := c.gameServerGetter.GameServers(lastGsState.ObjectMeta.Namespace).Update(ctx, lastGsState, metav1.UpdateOptions{})
 						if updateErr != nil {
-							if !k8serrors.IsConflict(errors.Cause(updateErr)) {
-								c.allocationCache.AddGameServer(lastGsState)
-							}
+							c.allocationCache.AddGameServer(lastGsState)
 							propagatedErr = goErrors.Join(ErrGameServerUpdateConflict, updateErr)
 						} else {
 							c.allocationCache.AddGameServer(updatedGs)
