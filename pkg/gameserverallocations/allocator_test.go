@@ -1336,8 +1336,7 @@ func TestAllocatorAllocateNoQuickNoGameServerError(t *testing.T) {
 	runtime.FeatureTestMutex.Lock()
 	defer runtime.FeatureTestMutex.Unlock()
 	require.NoError(t, runtime.ParseFeatures(
-		fmt.Sprintf("%s=false&%s=true&%s=true",
-			runtime.FeaturePlayerAllocationFilter,
+		fmt.Sprintf("%s=true&%s=true",
 			runtime.FeatureCountsAndLists,
 			runtime.FeatureProcessorAllocator)))
 
