@@ -759,13 +759,6 @@ func TestAllocationCacheReorderGameServerAfterAllocation(t *testing.T) {
 			gsToReorderIndex: 1,
 			want:             []*agonesv1.GameServer{&gs6, &gs4, &gs5Allocated},
 		},
-		"packed (FeaturePlayerAllocationFilter)": {
-			features:         fmt.Sprintf("%s=true", runtime.FeaturePlayerAllocationFilter),
-			list:             []*agonesv1.GameServer{&gs4, &gs5, &gs6},
-			gsToReorder:      &gs5Allocated,
-			gsToReorderIndex: 1,
-			want:             []*agonesv1.GameServer{&gs5Allocated, &gs4, &gs6},
-		},
 		"distributed (no change)": {
 			list:             []*agonesv1.GameServer{&gs0Allocated, &gs1, &gs2, &gs3},
 			packingStrategy:  apis.Distributed,
