@@ -62,6 +62,7 @@ func TestControllerAllocator(t *testing.T) {
 
 	runtime.FeatureTestMutex.Lock()
 	defer runtime.FeatureTestMutex.Unlock()
+	require.NoError(t, runtime.ParseFeatures(string(runtime.FeatureProcessorAllocator)+"=false"))
 
 	t.Run("successful allocation", func(t *testing.T) {
 		f, gsList := defaultFixtures(4)
@@ -387,6 +388,11 @@ func TestMultiClusterAllocationFromLocal(t *testing.T) {
 func TestMultiClusterAllocationFromRemote(t *testing.T) {
 	const clusterName = "remotecluster"
 	t.Parallel()
+
+	runtime.FeatureTestMutex.Lock()
+	defer runtime.FeatureTestMutex.Unlock()
+	require.NoError(t, runtime.ParseFeatures(string(runtime.FeatureProcessorAllocator)+"=false"))
+
 	t.Run("Handle allocation request remotely", func(t *testing.T) {
 		c, m := newFakeController()
 		fleetName := addReactorForGameServer(&m)
