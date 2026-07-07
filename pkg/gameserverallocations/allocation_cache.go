@@ -359,16 +359,6 @@ func compareGameServersAfterAllocationForPackedStrategy(
 		return true, false
 	}
 
-	if before.Status.Players != nil && after.Status.Players != nil {
-		cap1 := before.Status.Players.Capacity - before.Status.Players.Count
-		cap2 := after.Status.Players.Capacity - after.Status.Players.Count
-		if cap1 < cap2 {
-			return true, false
-		} else if cap2 < cap1 {
-			return false, false
-		}
-	}
-
 	if runtime.FeatureEnabled(runtime.FeatureCountsAndLists) && priorities != nil {
 		if res := before.CompareCountAndListPriorities(priorities, after); res != nil {
 			return *res, false
