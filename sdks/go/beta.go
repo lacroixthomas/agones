@@ -16,8 +16,8 @@ package sdk
 
 import (
 	"context"
+	"fmt"
 
-	"github.com/pkg/errors"
 	"google.golang.org/grpc"
 	"google.golang.org/protobuf/types/known/fieldmaskpb"
 	"google.golang.org/protobuf/types/known/wrapperspb"
@@ -42,7 +42,7 @@ func newBeta(conn *grpc.ClientConn) *Beta {
 func (b *Beta) GetCounterCount(key string) (int64, error) {
 	counter, err := b.client.GetCounter(context.Background(), &beta.GetCounterRequest{Name: key})
 	if err != nil {
-		return -1, errors.Wrapf(err, "could not get Counter %s count", key)
+		return -1, fmt.Errorf("could not get Counter %s count: %w", key, err)
 	}
 	return counter.Count, nil
 }
@@ -58,7 +58,7 @@ func (b *Beta) GetCounterCount(key string) (int64, error) {
 // value is batched asynchronous any value incremented past the capacity will be silently truncated.
 func (b *Beta) IncrementCounter(key string, amount int64) error {
 	if amount < 0 {
-		return errors.Errorf("amount must be a positive int64, found %d", amount)
+		return fmt.Errorf("amount must be a positive int64, found %d", amount)
 	}
 	_, err := b.client.UpdateCounter(context.Background(), &beta.UpdateCounterRequest{
 		CounterUpdateRequest: &beta.CounterUpdateRequest{
@@ -66,7 +66,7 @@ func (b *Beta) IncrementCounter(key string, amount int64) error {
 			CountDiff: amount,
 		}})
 	if err != nil {
-		return errors.Wrapf(err, "could not increment Counter %s by amount %d", key, amount)
+		return fmt.Errorf("could not increment Counter %s by amount %d: %w", key, amount, err)
 	}
 	return nil
 }
@@ -76,7 +76,7 @@ func (b *Beta) IncrementCounter(key string, amount int64) error {
 // Will error if the count is at 0 (to the latest knowledge of the SDK), and no decrement will occur.
 func (b *Beta) DecrementCounter(key string, amount int64) error {
 	if amount < 0 {
-		return errors.Errorf("amount must be a positive int64, found %d", amount)
+		return fmt.Errorf("amount must be a positive int64, found %d", amount)
 	}
 	_, err := b.client.UpdateCounter(context.Background(), &beta.UpdateCounterRequest{
 		CounterUpdateRequest: &beta.CounterUpdateRequest{
@@ -84,7 +84,7 @@ func (b *Beta) DecrementCounter(key string, amount int64) error {
 			CountDiff: amount * -1,
 		}})
 	if err != nil {
-		return errors.Wrapf(err, "could not decrement Counter %s by amount %d", key, amount)
+		return fmt.Errorf("could not decrement Counter %s by amount %d: %w", key, amount, err)
 	}
 	return nil
 }
@@ -98,17 +98,17 @@ func (b *Beta) SetCounterCount(key string, amount int64) error {
 			Count: wrapperspb.Int64(amount),
 		}})
 	if err != nil {
-		return errors.Wrapf(err, "could not set Counter %s count to amount %d", key, amount)
+		return fmt.Errorf("could not set Counter %s count to amount %d: %w", key, amount, err)
 	}
 	return nil
 }
 
-// GetCounterCapacity returns the Capacity for a Counter, given the Counter's key (name).
+// GetCounterCapacity returns the Capacity for a Counter, given the Counter’s key (name).
 // Will error if the key was not predefined in the GameServer resource on creation.
 func (b *Beta) GetCounterCapacity(key string) (int64, error) {
 	counter, err := b.client.GetCounter(context.Background(), &beta.GetCounterRequest{Name: key})
 	if err != nil {
-		return -1, errors.Wrapf(err, "could not get Counter %s capacity", key)
+		return -1, fmt.Errorf("could not get Counter %s capacity: %w", key, err)
 	}
 	return counter.Capacity, nil
 }
@@ -121,17 +121,17 @@ func (b *Beta) SetCounterCapacity(key string, amount int64) error {
 			Capacity: wrapperspb.Int64(amount),
 		}})
 	if err != nil {
-		return errors.Wrapf(err, "could not set Counter %s capacity to amount %d", key, amount)
+		return fmt.Errorf("could not set Counter %s capacity to amount %d: %w", key, amount, err)
 	}
 	return nil
 }
 
-// GetListCapacity returns the Capacity for a List, given the List's key (name).
+// GetListCapacity returns the Capacity for a List, given the List’s key (name).
 // Will error if the key was not predefined in the GameServer resource on creation.
 func (b *Beta) GetListCapacity(key string) (int64, error) {
 	list, err := b.client.GetList(context.Background(), &beta.GetListRequest{Name: key})
 	if err != nil {
-		return -1, errors.Wrapf(err, "could not get List %s", key)
+		return -1, fmt.Errorf("could not get List %s: %w", key, err)
 	}
 	return list.Capacity, nil
 }
@@ -147,18 +147,18 @@ func (b *Beta) SetListCapacity(key string, amount int64) error {
 		UpdateMask: &fieldmaskpb.FieldMask{Paths: []string{"capacity"}},
 	})
 	if err != nil {
-		return errors.Wrapf(err, "could not set List %s capacity to amount %d", key, amount)
+		return fmt.Errorf("could not set List %s capacity to amount %d: %w", key, amount, err)
 	}
 	return nil
 }
 
-// ListContains returns if a string exists in a List's values list, given the List's key (name)
+// ListContains returns if a string exists in a List’s values list, given the List’s key (name)
 // and the string value. Search is case-sensitive.
 // Will error if the key was not predefined in the GameServer resource on creation.
 func (b *Beta) ListContains(key, value string) (bool, error) {
 	list, err := b.client.GetList(context.Background(), &beta.GetListRequest{Name: key})
 	if err != nil {
-		return false, errors.Wrapf(err, "could not get List %s", key)
+		return false, fmt.Errorf("could not get List %s: %w", key, err)
 	}
 	for _, val := range list.Values {
 		if val == value {
@@ -168,44 +168,44 @@ func (b *Beta) ListContains(key, value string) (bool, error) {
 	return false, nil
 }
 
-// GetListLength returns the length of the Values list for a List, given the List's key (name).
+// GetListLength returns the length of the Values list for a List, given the List’s key (name).
 // Will error if the key was not predefined in the GameServer resource on creation.
 func (b *Beta) GetListLength(key string) (int, error) {
 	list, err := b.client.GetList(context.Background(), &beta.GetListRequest{Name: key})
 	if err != nil {
-		return -1, errors.Wrapf(err, "could not get List %s", key)
+		return -1, fmt.Errorf("could not get List %s: %w", key, err)
 	}
 	return len(list.Values), nil
 }
 
-// GetListValues returns the Values for a List, given the List's key (name).
+// GetListValues returns the Values for a List, given the List’s key (name).
 // Will error if the key was not predefined in the GameServer resource on creation.
 func (b *Beta) GetListValues(key string) ([]string, error) {
 	list, err := b.client.GetList(context.Background(), &beta.GetListRequest{Name: key})
 	if err != nil {
-		return nil, errors.Wrapf(err, "could not get List %s", key)
+		return nil, fmt.Errorf("could not get List %s: %w", key, err)
 	}
 	return list.Values, nil
 }
 
-// AppendListValue appends a string to a List's values list, given the List's key (name)
+// AppendListValue appends a string to a List’s values list, given the List’s key (name)
 // and the string value. Will error if the string already exists in the list.
 // Will error if the key was not predefined in the GameServer resource on creation.
 func (b *Beta) AppendListValue(key, value string) error {
 	_, err := b.client.AddListValue(context.Background(), &beta.AddListValueRequest{Name: key, Value: value})
 	if err != nil {
-		return errors.Wrapf(err, "could not get List %s", key)
+		return fmt.Errorf("could not append value to List %s: %w", key, err)
 	}
 	return nil
 }
 
-// DeleteListValue removes a string from a List's values list, given the List's key (name)
+// DeleteListValue removes a string from a List’s values list, given the List’s key (name)
 // and the string value. Will error if the string does not exist in the list.
 // Will error if the key was not predefined in the GameServer resource on creation.
 func (b *Beta) DeleteListValue(key, value string) error {
 	_, err := b.client.RemoveListValue(context.Background(), &beta.RemoveListValueRequest{Name: key, Value: value})
 	if err != nil {
-		return errors.Wrapf(err, "could not get List %s", key)
+		return fmt.Errorf("could not delete value from List %s: %w", key, err)
 	}
 	return nil
 }

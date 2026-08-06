@@ -22,7 +22,6 @@ import (
 	"os"
 	"time"
 
-	"github.com/pkg/errors"
 	"google.golang.org/grpc/credentials/insecure"
 
 	"google.golang.org/grpc"
@@ -75,13 +74,16 @@ func NewSDK() (*SDK, error) {
 	// nolint: staticcheck
 	conn, err := grpc.DialContext(ctx, addr, grpc.WithBlock(), grpc.WithTransportCredentials(insecure.NewCredentials()))
 	if err != nil {
-		return s, errors.Wrapf(err, "could not connect to %s", addr)
+		return s, fmt.Errorf("could not connect to %s: %w", addr, err)
 	}
 	s.client = sdk.NewSDKClient(conn)
 	s.health, err = s.client.Health(s.ctx)
 	s.alpha = newAlpha(conn)
 	s.beta = newBeta(conn)
-	return s, errors.Wrap(err, "could not set up health check")
+	if err != nil {
+		return s, fmt.Errorf("could not set up health check: %w", err)
+	}
+	return s, nil
 }
 
 // Alpha returns the Alpha SDK.
@@ -97,19 +99,28 @@ func (s *SDK) Beta() *Beta {
 // Ready marks the Game Server as ready to receive connections.
 func (s *SDK) Ready() error {
 	_, err := s.client.Ready(s.ctx, &sdk.Empty{})
-	return errors.Wrap(err, "could not send Ready message")
+	if err != nil {
+		return fmt.Errorf("could not send Ready message: %w", err)
+	}
+	return nil
 }
 
 // Allocate self marks this gameserver as Allocated.
 func (s *SDK) Allocate() error {
 	_, err := s.client.Allocate(s.ctx, &sdk.Empty{})
-	return errors.Wrap(err, "could not mark self as Allocated")
+	if err != nil {
+		return fmt.Errorf("could not mark self as Allocated: %w", err)
+	}
+	return nil
 }
 
 // Shutdown marks the Game Server as ready to shutdown.
 func (s *SDK) Shutdown() error {
 	_, err := s.client.Shutdown(s.ctx, &sdk.Empty{})
-	return errors.Wrapf(err, "could not send Shutdown message")
+	if err != nil {
+		return fmt.Errorf("could not send Shutdown message: %w", err)
+	}
+	return nil
 }
 
 // Reserve marks the Game Server as Reserved for a given duration, at which point
@@ -117,32 +128,47 @@ func (s *SDK) Shutdown() error {
 // Do note, the smallest unit available in the time.Duration argument is a second.
 func (s *SDK) Reserve(d time.Duration) error {
 	_, err := s.client.Reserve(s.ctx, &sdk.Duration{Seconds: int64(d.Seconds())})
-	return errors.Wrap(err, "could not send Reserve message")
+	if err != nil {
+		return fmt.Errorf("could not send Reserve message: %w", err)
+	}
+	return nil
 }
 
 // Health sends a ping to the sidecar health check to indicate that this Game Server is healthy.
 func (s *SDK) Health() error {
-	return errors.Wrap(s.health.Send(&sdk.Empty{}), "could not send Health ping")
+	if err := s.health.Send(&sdk.Empty{}); err != nil {
+		return fmt.Errorf("could not send Health ping: %w", err)
+	}
+	return nil
 }
 
 // SetLabel sets a metadata label on the `GameServer` with the prefix "agones.dev/sdk-".
 func (s *SDK) SetLabel(key, value string) error {
 	kv := &sdk.KeyValue{Key: key, Value: value}
 	_, err := s.client.SetLabel(s.ctx, kv)
-	return errors.Wrap(err, "could not set label")
+	if err != nil {
+		return fmt.Errorf("could not set label: %w", err)
+	}
+	return nil
 }
 
 // SetAnnotation sets a metadata annotation on the `GameServer` with the prefix "agones.dev/sdk-".
 func (s *SDK) SetAnnotation(key, value string) error {
 	kv := &sdk.KeyValue{Key: key, Value: value}
 	_, err := s.client.SetAnnotation(s.ctx, kv)
-	return errors.Wrap(err, "could not set annotation")
+	if err != nil {
+		return fmt.Errorf("could not set annotation: %w", err)
+	}
+	return nil
 }
 
 // GameServer retrieve the GameServer details.
 func (s *SDK) GameServer() (*sdk.GameServer, error) {
 	gs, err := s.client.GetGameServer(s.ctx, &sdk.Empty{})
-	return gs, errors.Wrap(err, "could not retrieve gameserver")
+	if err != nil {
+		return nil, fmt.Errorf("could not retrieve gameserver: %w", err)
+	}
+	return gs, nil
 }
 
 // WatchGameServer asynchronously calls the given GameServerCallback with the current GameServer
@@ -151,7 +177,7 @@ func (s *SDK) GameServer() (*sdk.GameServer, error) {
 func (s *SDK) WatchGameServer(f GameServerCallback) error {
 	stream, err := s.client.WatchGameServer(s.ctx, &sdk.Empty{})
 	if err != nil {
-		return errors.Wrap(err, "could not watch gameserver")
+		return fmt.Errorf("could not watch gameserver: %w", err)
 	}
 	log := func(gs *sdk.GameServer, msg string, err error) {
 		if gs == nil || gs.ObjectMeta.DeletionTimestamp == 0 {

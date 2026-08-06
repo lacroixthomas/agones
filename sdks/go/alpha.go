@@ -16,8 +16,8 @@ package sdk
 
 import (
 	"context"
+	"fmt"
 
-	"github.com/pkg/errors"
 	"google.golang.org/grpc"
 
 	"agones.dev/agones/pkg/sdk/alpha"
@@ -39,13 +39,19 @@ func newAlpha(conn *grpc.ClientConn) *Alpha {
 // If the player capacity is set from outside the SDK, use SDK.GameServer() instead.
 func (a *Alpha) GetPlayerCapacity() (int64, error) {
 	c, err := a.client.GetPlayerCapacity(context.Background(), &alpha.Empty{})
-	return c.GetCount(), errors.Wrap(err, "could not get player capacity")
+	if err != nil {
+		return 0, fmt.Errorf("could not get player capacity: %w", err)
+	}
+	return c.GetCount(), nil
 }
 
 // SetPlayerCapacity changes the player capacity to a new value.
 func (a *Alpha) SetPlayerCapacity(capacity int64) error {
 	_, err := a.client.SetPlayerCapacity(context.Background(), &alpha.Count{Count: capacity})
-	return errors.Wrap(err, "could not set player capacity")
+	if err != nil {
+		return fmt.Errorf("could not set player capacity: %w", err)
+	}
+	return nil
 }
 
 // PlayerConnect increases the SDK’s stored player count by one, and appends this playerID to status.players.id.
@@ -53,7 +59,10 @@ func (a *Alpha) SetPlayerCapacity(capacity int64) error {
 // list of connected playerIDs.
 func (a *Alpha) PlayerConnect(id string) (bool, error) {
 	ok, err := a.client.PlayerConnect(context.Background(), &alpha.PlayerID{PlayerID: id})
-	return ok.GetBool(), errors.Wrap(err, "could not register connected player")
+	if err != nil {
+		return false, fmt.Errorf("could not register connected player: %w", err)
+	}
+	return ok.GetBool(), nil
 }
 
 // PlayerDisconnect Decreases the SDK’s stored player count by one, and removes the playerID from status.players.id.
@@ -61,25 +70,37 @@ func (a *Alpha) PlayerConnect(id string) (bool, error) {
 // playerID value exists within the list.
 func (a *Alpha) PlayerDisconnect(id string) (bool, error) {
 	ok, err := a.client.PlayerDisconnect(context.Background(), &alpha.PlayerID{PlayerID: id})
-	return ok.GetBool(), errors.Wrap(err, "could not register disconnected player")
+	if err != nil {
+		return false, fmt.Errorf("could not register disconnected player: %w", err)
+	}
+	return ok.GetBool(), nil
 }
 
 // GetPlayerCount returns the current player count.
 func (a *Alpha) GetPlayerCount() (int64, error) {
 	count, err := a.client.GetPlayerCount(context.Background(), &alpha.Empty{})
-	return count.GetCount(), errors.Wrap(err, "could not get player count")
+	if err != nil {
+		return 0, fmt.Errorf("could not get player count: %w", err)
+	}
+	return count.GetCount(), nil
 }
 
 // IsPlayerConnected returns if the playerID is currently connected to the GameServer.
 // This is always accurate, even if the value hasn’t been updated to the GameServer status yet.
 func (a *Alpha) IsPlayerConnected(id string) (bool, error) {
 	ok, err := a.client.IsPlayerConnected(context.Background(), &alpha.PlayerID{PlayerID: id})
-	return ok.GetBool(), errors.Wrap(err, "could not get if player is connected")
+	if err != nil {
+		return false, fmt.Errorf("could not get if player is connected: %w", err)
+	}
+	return ok.GetBool(), nil
 }
 
 // GetConnectedPlayers returns the list of the currently connected player ids.
 // This is always accurate, even if the value hasn’t been updated to the GameServer status yet.
 func (a *Alpha) GetConnectedPlayers() ([]string, error) {
 	list, err := a.client.GetConnectedPlayers(context.Background(), &alpha.Empty{})
-	return list.GetList(), errors.Wrap(err, "could not list connected players")
+	if err != nil {
+		return nil, fmt.Errorf("could not list connected players: %w", err)
+	}
+	return list.GetList(), nil
 }
