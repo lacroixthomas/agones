@@ -16,7 +16,6 @@ package gameservers
 
 import (
 	"context"
-	"fmt"
 	"strings"
 
 	"agones.dev/agones/pkg/apis/agones"
@@ -146,7 +145,7 @@ func (mc *MigrationController) isMigratingGameServerPod(pod *corev1.Pod) (*agone
 			mc.loggerForGameServerKey(key).Debug("GameServer is no longer available for syncing")
 			return nil, nil, false, nil
 		}
-		return nil, nil, false, mc.errs.Wrap(err, fmt.Sprintf("error retrieving GameServer %s from namespace %s", pod.ObjectMeta.Name, pod.ObjectMeta.Namespace))
+		return nil, nil, false, mc.errs.Errorf("error retrieving GameServer %s from namespace %s: %w", pod.ObjectMeta.Name, pod.ObjectMeta.Namespace, err)
 	}
 
 	// Either the address has not been set, or we're being deleted already
@@ -164,7 +163,7 @@ func (mc *MigrationController) isMigratingGameServerPod(pod *corev1.Pod) (*agone
 			mc.loggerForGameServerKey(key).WithField("node", pod.Spec.NodeName).Debug("Node is no longer available for syncing")
 			return nil, nil, false, nil
 		}
-		return nil, nil, false, mc.errs.Wrap(err, fmt.Sprintf("error retrieving node %s for Pod %s", pod.Spec.NodeName, pod.ObjectMeta.Name))
+		return nil, nil, false, mc.errs.Errorf("error retrieving node %s for Pod %s: %w", pod.Spec.NodeName, pod.ObjectMeta.Name, err)
 	}
 
 	// if the node is being terminated, then also escape, because the Pod is going to be Terminated if it hasn't been
@@ -199,7 +198,7 @@ func (mc *MigrationController) syncGameServer(ctx context.Context, key string) e
 			mc.loggerForGameServerKey(key).Debug("Pod is no longer available for syncing")
 			return nil
 		}
-		return mc.errs.Wrap(err, fmt.Sprintf("error retrieving Pod %s from namespace %s", name, namespace))
+		return mc.errs.Errorf("error retrieving Pod %s from namespace %s: %w", name, namespace, err)
 	}
 
 	gs, node, ok, err := mc.isMigratingGameServerPod(pod)

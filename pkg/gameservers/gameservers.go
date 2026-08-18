@@ -15,7 +15,6 @@
 package gameservers
 
 import (
-	"fmt"
 	"net"
 
 	agonesv1 "agones.dev/agones/pkg/apis/agones/v1"
@@ -89,7 +88,7 @@ func address(node *corev1.Node) (string, []corev1.NodeAddress, error) {
 func applyGameServerAddressAndPort(gs *agonesv1.GameServer, node *corev1.Node, pod *corev1.Pod, syncPodPortsToGameServer func(*agonesv1.GameServer, *corev1.Pod) error) (*agonesv1.GameServer, error) {
 	addr, addrs, err := address(node)
 	if err != nil {
-		return gs, errs.Wrap(err, fmt.Sprintf("error getting external address for GameServer %s", gs.ObjectMeta.Name))
+		return gs, errs.Errorf("error getting external address for GameServer %s: %w", gs.ObjectMeta.Name, err)
 	}
 
 	gs.Status.Address = addr
@@ -104,7 +103,7 @@ func applyGameServerAddressAndPort(gs *agonesv1.GameServer, node *corev1.Node, p
 	}
 
 	if err := syncPodPortsToGameServer(gs, pod); err != nil {
-		return gs, errs.Wrap(err, fmt.Sprintf("cloud product error syncing ports on GameServer %s", gs.ObjectMeta.Name))
+		return gs, errs.Errorf("cloud product error syncing ports on GameServer %s: %w", gs.ObjectMeta.Name, err)
 	}
 
 	// HostPort is always going to be populated, even when dynamic

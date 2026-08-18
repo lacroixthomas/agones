@@ -16,7 +16,6 @@ package gameservers
 
 import (
 	"context"
-	"fmt"
 
 	"agones.dev/agones/pkg/apis/agones"
 	agonesv1 "agones.dev/agones/pkg/apis/agones/v1"
@@ -147,7 +146,7 @@ func (c *SucceededController) syncGameServer(ctx context.Context, key string) er
 	pod, err := c.podLister.Pods(namespace).Get(name)
 	if err != nil {
 		if !k8serrors.IsNotFound(err) {
-			return c.errs.Wrap(err, fmt.Sprintf("error retrieving Pod %s from namespace %s", name, namespace))
+			return c.errs.Errorf("error retrieving Pod %s from namespace %s: %w", name, namespace, err)
 		}
 		// If the pod doesn't exist, we don't need to do anything
 		return nil
@@ -166,7 +165,7 @@ func (c *SucceededController) syncGameServer(ctx context.Context, key string) er
 			c.loggerForGameServerKey(key).Debug("GameServer is no longer available for syncing")
 			return nil
 		}
-		return c.errs.Wrap(err, fmt.Sprintf("error retrieving GameServer %s from namespace %s", name, namespace))
+		return c.errs.Errorf("error retrieving GameServer %s from namespace %s: %w", name, namespace, err)
 	}
 
 	// already on the way out, so no need to do anything.

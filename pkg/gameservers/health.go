@@ -16,7 +16,6 @@ package gameservers
 
 import (
 	"context"
-	"fmt"
 	"strings"
 
 	"agones.dev/agones/pkg/apis/agones"
@@ -222,7 +221,7 @@ func (hc *HealthController) syncGameServer(ctx context.Context, key string) erro
 			hc.loggerForGameServerKey(key).Debug("GameServer is no longer available for syncing")
 			return nil
 		}
-		return hc.errs.Wrap(err, fmt.Sprintf("error retrieving GameServer %s from namespace %s", name, namespace))
+		return hc.errs.Errorf("error retrieving GameServer %s from namespace %s: %w", name, namespace, err)
 	}
 
 	// at this point we don't care, we're already Unhealthy / deleting
@@ -235,7 +234,7 @@ func (hc *HealthController) syncGameServer(ctx context.Context, key string) erro
 	if err != nil {
 		if !k8serrors.IsNotFound(err) {
 			// If the pod exists but there is an error, go back into the queue.
-			return hc.errs.Wrap(err, fmt.Sprintf("error retrieving Pod %s for GameServer to check status", gs.ObjectMeta.Name))
+			return hc.errs.Errorf("error retrieving Pod %s for GameServer to check status: %w", gs.ObjectMeta.Name, err)
 		}
 		hc.baseLogger.WithField("gs", gs.ObjectMeta.Name).Debug("Could not find Pod")
 	}
@@ -258,7 +257,7 @@ func (hc *HealthController) syncGameServer(ctx context.Context, key string) erro
 	gsCopy.Status.State = agonesv1.GameServerStateUnhealthy
 
 	if _, err := hc.gameServerGetter.GameServers(gs.ObjectMeta.Namespace).Update(ctx, gsCopy, metav1.UpdateOptions{}); err != nil {
-		return hc.errs.Wrap(err, fmt.Sprintf("error updating GameServer %s/%s to unhealthy", gs.ObjectMeta.Name, gs.ObjectMeta.Namespace))
+		return hc.errs.Errorf("error updating GameServer %s/%s to unhealthy: %w", gs.ObjectMeta.Name, gs.ObjectMeta.Namespace, err)
 	}
 
 	hc.recorder.Event(gs, corev1.EventTypeWarning, string(gsCopy.Status.State), "Issue with Gameserver pod")
