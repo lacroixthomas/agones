@@ -146,7 +146,7 @@ func (c *SucceededController) syncGameServer(ctx context.Context, key string) er
 	pod, err := c.podLister.Pods(namespace).Get(name)
 	if err != nil {
 		if !k8serrors.IsNotFound(err) {
-			return c.errs.Errorf("error retrieving Pod %s from namespace %s: %w", name, namespace, err)
+			return c.errs.Wrapf(err, "error retrieving Pod %s from namespace %s", name, namespace)
 		}
 		// If the pod doesn't exist, we don't need to do anything
 		return nil
@@ -165,7 +165,7 @@ func (c *SucceededController) syncGameServer(ctx context.Context, key string) er
 			c.loggerForGameServerKey(key).Debug("GameServer is no longer available for syncing")
 			return nil
 		}
-		return c.errs.Errorf("error retrieving GameServer %s from namespace %s: %w", name, namespace, err)
+		return c.errs.Wrapf(err, "error retrieving GameServer %s from namespace %s", name, namespace)
 	}
 
 	// already on the way out, so no need to do anything.

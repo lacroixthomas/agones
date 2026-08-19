@@ -1934,7 +1934,8 @@ func TestControllerSyncGameServerRequestReadyState(t *testing.T) {
 				return []corev1.ContainerStatus{{Name: containerName}}
 			},
 			check: func(t *testing.T, _ *agonesv1.GameServer, err error, gsUpdated, podUpdated bool) {
-				require.EqualError(t, err, "game server container for GameServer test in namespace default is not currently running, try again")
+				require.Error(t, err)
+				assert.Contains(t, err.Error(), "game server container for GameServer test in namespace default is not currently running, try again")
 				assert.False(t, gsUpdated, "GameServer was updated")
 				assert.False(t, podUpdated, "Pod was updated")
 			},
@@ -1946,7 +1947,8 @@ func TestControllerSyncGameServerRequestReadyState(t *testing.T) {
 				return nil
 			},
 			check: func(t *testing.T, _ *agonesv1.GameServer, err error, gsUpdated, podUpdated bool) {
-				require.EqualError(t, err, "game server container for GameServer test in namespace default not present in pod status, try again")
+				require.Error(t, err)
+				assert.Contains(t, err.Error(), "game server container for GameServer test in namespace default not present in pod status, try again")
 				assert.False(t, gsUpdated, "GameServer was updated")
 				assert.False(t, podUpdated, "Pod was updated")
 			},
