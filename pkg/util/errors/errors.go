@@ -127,7 +127,10 @@ func (e *Errors) Wrap(err error, msg string) error {
 //
 // Wrapf returns nil if err is nil.
 func (e *Errors) Wrapf(err error, format string, a ...any) error {
-	return e.Wrap(err, fmt.Sprintf(format, a...))
+	if err == nil {
+		return nil
+	}
+	return fmt.Errorf("%s: %w", e.prefix(fmt.Sprintf(format, a...)), err)
 }
 
 // prefix returns msg prefixed with the package and struct name, omitting either
