@@ -98,6 +98,8 @@ var remoteAllocationRetry = wait.Backoff{
 }
 
 // Allocator handles game server allocation
+//
+//nolint:govet // fieldalignment: struct alignment is not critical for our use case
 type Allocator struct {
 	baseLogger                   *logrus.Entry
 	allocationPolicyLister       multiclusterlisterv1.GameServerAllocationPolicyLister
