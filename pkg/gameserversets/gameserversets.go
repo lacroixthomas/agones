@@ -23,7 +23,6 @@ import (
 	"agones.dev/agones/pkg/gameservers"
 	"agones.dev/agones/pkg/util/logfields"
 	"agones.dev/agones/pkg/util/runtime"
-	"github.com/pkg/errors"
 	"github.com/sirupsen/logrus"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/labels"
@@ -128,7 +127,7 @@ func ListGameServersByGameServerSetOwner(gameServerLister listerv1.GameServerLis
 	gsSet *agonesv1.GameServerSet) ([]*agonesv1.GameServer, error) {
 	list, err := gameServerLister.List(labels.SelectorFromSet(labels.Set{agonesv1.GameServerSetGameServerLabel: gsSet.ObjectMeta.Name}))
 	if err != nil {
-		return list, errors.Wrapf(err, "error listing gameservers for gameserverset %s", gsSet.ObjectMeta.Name)
+		return list, errs.Wrapf(err, "error listing gameservers for gameserverset %s", gsSet.ObjectMeta.Name)
 	}
 
 	var result []*agonesv1.GameServer
