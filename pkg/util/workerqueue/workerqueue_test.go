@@ -22,8 +22,9 @@ import (
 	"testing"
 	"time"
 
+	stderrors "errors"
+
 	"github.com/heptiolabs/healthcheck"
-	"github.com/pkg/errors"
 	"github.com/sirupsen/logrus"
 	"github.com/stretchr/testify/assert"
 	"k8s.io/apimachinery/pkg/util/wait"
@@ -197,7 +198,7 @@ func TestWorkerQueueEnqueueAfter(t *testing.T) {
 }
 
 func TestDebugError(t *testing.T) {
-	err := errors.New("not a debug error")
+	err := stderrors.New("not a debug error")
 	assert.False(t, isTraceError(err))
 
 	err = NewTraceError(err)
