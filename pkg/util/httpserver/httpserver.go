@@ -14,6 +14,6 @@
 
 package httpserver
 
-import utilErrors "agones.dev/agones/pkg/util/errors"
+import "agones.dev/agones/pkg/util/errors"
 
-var errs = utilErrors.FromPackage()
+var errs = errors.FromPackage()

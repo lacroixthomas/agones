@@ -19,7 +19,7 @@ import (
 	"encoding/json"
 	"net/http"
 
-	utilErrors "agones.dev/agones/pkg/util/errors"
+	"agones.dev/agones/pkg/util/errors"
 	"agones.dev/agones/pkg/util/runtime"
 	"github.com/sirupsen/logrus"
 	admissionv1 "k8s.io/api/admission/v1"
@@ -30,7 +30,7 @@ import (
 // WebHook manage Kubernetes webhooks
 type WebHook struct {
 	logger   *logrus.Entry
-	errs     *utilErrors.Errors
+	errs     *errors.Errors
 	mux      *http.ServeMux
 	handlers map[string][]operationHandler
 }
@@ -54,7 +54,7 @@ func NewWebHook(mux *http.ServeMux) *WebHook {
 	}
 
 	wh.logger = runtime.NewLoggerWithType(wh)
-	wh.errs = utilErrors.FromStruct(wh)
+	wh.errs = errors.FromStruct(wh)
 	return wh
 }
 

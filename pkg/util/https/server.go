@@ -22,7 +22,7 @@ import (
 	"sync"
 	"time"
 
-	utilErrors "agones.dev/agones/pkg/util/errors"
+	"agones.dev/agones/pkg/util/errors"
 	"agones.dev/agones/pkg/util/fswatch"
 	"agones.dev/agones/pkg/util/runtime"
 	"github.com/sirupsen/logrus"
@@ -54,7 +54,7 @@ type certServer struct {
 type Server struct {
 	certServer certServer
 	logger     *logrus.Entry
-	errs       *utilErrors.Errors
+	errs       *errors.Errors
 	Mux        *http.ServeMux
 	tls        tls
 	certFile   string
@@ -73,7 +73,7 @@ func NewServer(certFile, keyFile string, port string) *Server {
 		port:     port,
 	}
 	wh.logger = runtime.NewLoggerWithType(wh)
-	wh.errs = utilErrors.FromStruct(wh)
+	wh.errs = errors.FromStruct(wh)
 	wh.setupServer()
 	wh.Mux.HandleFunc("/", wh.defaultHandler)
 

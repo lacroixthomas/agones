@@ -16,13 +16,12 @@ package workerqueue
 
 import (
 	"context"
+	"errors"
 	"io"
 	"net/http"
 	"net/http/httptest"
 	"testing"
 	"time"
-
-	stderrors "errors"
 
 	"github.com/heptiolabs/healthcheck"
 	"github.com/sirupsen/logrus"
@@ -198,7 +197,7 @@ func TestWorkerQueueEnqueueAfter(t *testing.T) {
 }
 
 func TestDebugError(t *testing.T) {
-	err := stderrors.New("not a debug error")
+	err := errors.New("not a debug error")
 	assert.False(t, isTraceError(err))
 
 	err = NewTraceError(err)

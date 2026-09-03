@@ -22,8 +22,8 @@ import (
 	"reflect"
 	"strings"
 
+	"agones.dev/agones/pkg/util/errors"
 	"agones.dev/agones/pkg/util/https"
-	utilErrors "agones.dev/agones/pkg/util/errors"
 	"agones.dev/agones/pkg/util/runtime"
 	"github.com/go-openapi/spec"
 	"github.com/munnerz/goautoneg"
@@ -51,7 +51,7 @@ var (
 		&metav1.APIResourceList{},
 	}
 
-	errs = utilErrors.FromPackage()
+	errs = errors.FromPackage()
 )
 
 const (
@@ -73,7 +73,7 @@ type CRDHandler func(http.ResponseWriter, *http.Request, string) error
 // for Kubernetes APIServer extensions.
 type APIServer struct {
 	logger             *logrus.Entry
-	errs               *utilErrors.Errors
+	errs               *errors.Errors
 	mux                *http.ServeMux
 	resourceList       map[string]*metav1.APIResourceList
 	openapiv2          *spec.Swagger
@@ -92,7 +92,7 @@ func NewAPIServer(mux *http.ServeMux) *APIServer {
 		delegates:          map[string]CRDHandler{},
 	}
 	s.logger = runtime.NewLoggerWithType(s)
-	s.errs = utilErrors.FromStruct(s)
+	s.errs = errors.FromStruct(s)
 	s.logger.Debug("API Server Started")
 
 	// We don't *have* to have a v3 openapi api, so just do an empty one for now, and we can expand as needed.

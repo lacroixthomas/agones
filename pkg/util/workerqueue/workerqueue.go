@@ -24,7 +24,7 @@ import (
 	"sync"
 	"time"
 
-	utilErrors "agones.dev/agones/pkg/util/errors"
+	"agones.dev/agones/pkg/util/errors"
 	"agones.dev/agones/pkg/util/logfields"
 	"agones.dev/agones/pkg/util/runtime"
 	"github.com/sirupsen/logrus"
@@ -74,7 +74,7 @@ type Handler func(context.Context, string) error
 //nolint:govet // ignore fieldalignment, singleton
 type WorkerQueue struct {
 	logger  *logrus.Entry
-	errs    *utilErrors.Errors
+	errs    *errors.Errors
 	keyName string
 	queue   workqueue.TypedRateLimitingInterface[any]
 	// SyncHandler is exported to make testing easier (hack)
@@ -114,7 +114,7 @@ func NewWorkerQueueWithRateLimiter(handler Handler, logger *logrus.Entry, keyNam
 		queue:       workqueue.NewNamedRateLimitingQueue(rateLimiter, queueName),
 		SyncHandler: handler,
 	}
-	wq.errs = utilErrors.FromStruct(wq)
+	wq.errs = errors.FromStruct(wq)
 	return wq
 }
 
