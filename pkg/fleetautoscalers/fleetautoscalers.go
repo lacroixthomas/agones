@@ -48,11 +48,11 @@ import (
 	"agones.dev/agones/pkg/util/runtime"
 )
 
-var errs = errors.FromPackage()
-
 const (
 	maxDuration = "2540400h" // 290 Years
 )
+
+var errs = errors.FromPackage()
 
 // InactiveScheduleError denotes an error for schedules that are not currently active.
 type InactiveScheduleError struct{}
