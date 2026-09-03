@@ -34,6 +34,7 @@ import (
 	listerautoscalingv1 "agones.dev/agones/pkg/client/listers/autoscaling/v1"
 	"agones.dev/agones/pkg/gameservers"
 	"agones.dev/agones/pkg/util/crd"
+	"agones.dev/agones/pkg/util/errors"
 	"agones.dev/agones/pkg/util/logfields"
 	"agones.dev/agones/pkg/util/runtime"
 	"agones.dev/agones/pkg/util/webhooks"
@@ -42,8 +43,6 @@ import (
 	extism "github.com/extism/go-sdk"
 	"github.com/heptiolabs/healthcheck"
 	"github.com/sirupsen/logrus"
-
-	"agones.dev/agones/pkg/util/errors"
 	"gomodules.xyz/jsonpatch/v2"
 	admissionv1 "k8s.io/api/admission/v1"
 	corev1 "k8s.io/api/core/v1"

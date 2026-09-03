@@ -21,6 +21,7 @@ import (
 	"crypto/tls"
 	"crypto/x509"
 	"encoding/json"
+	stderrors "errors"
 	"fmt"
 	"io"
 	"math"
@@ -29,12 +30,9 @@ import (
 	"strings"
 	"time"
 
-	stderrors "errors"
-
 	extism "github.com/extism/go-sdk"
 	"github.com/robfig/cron/v3"
 
-	"agones.dev/agones/pkg/util/errors"
 	corev1 "k8s.io/api/core/v1"
 	"k8s.io/apimachinery/pkg/util/intstr"
 	"k8s.io/apimachinery/pkg/util/uuid"
@@ -45,6 +43,7 @@ import (
 	"agones.dev/agones/pkg/fleets"
 	"agones.dev/agones/pkg/gameservers"
 	gssets "agones.dev/agones/pkg/gameserversets"
+	"agones.dev/agones/pkg/util/errors"
 	"agones.dev/agones/pkg/util/runtime"
 )
 
