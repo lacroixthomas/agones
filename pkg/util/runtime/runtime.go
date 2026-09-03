@@ -21,7 +21,7 @@ import (
 	"fmt"
 	"time"
 
-	utilErrors "agones.dev/agones/pkg/util/errors"
+	"agones.dev/agones/pkg/util/errors"
 	gwruntime "github.com/grpc-ecosystem/grpc-gateway/v2/runtime"
 	"github.com/sirupsen/logrus"
 	"google.golang.org/protobuf/encoding/protojson"
@@ -30,7 +30,7 @@ import (
 	clientcmd "k8s.io/client-go/tools/clientcmd"
 )
 
-var errs = utilErrors.FromPackage()
+var errs = errors.FromPackage()
 
 const sourceKey = "source"
 

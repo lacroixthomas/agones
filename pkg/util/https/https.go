@@ -19,12 +19,12 @@ import (
 	"io"
 	"net/http"
 
-	utilErrors "agones.dev/agones/pkg/util/errors"
+	"agones.dev/agones/pkg/util/errors"
 	"agones.dev/agones/pkg/util/runtime"
 	"github.com/sirupsen/logrus"
 )
 
-var errs = utilErrors.FromPackage()
+var errs = errors.FromPackage()
 
 // ErrorHandlerFunc is a http handler that can return an error
 // for standard logging and a 500 response
