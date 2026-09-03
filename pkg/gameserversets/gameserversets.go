@@ -21,12 +21,15 @@ import (
 	agonesv1 "agones.dev/agones/pkg/apis/agones/v1"
 	listerv1 "agones.dev/agones/pkg/client/listers/agones/v1"
 	"agones.dev/agones/pkg/gameservers"
+	"agones.dev/agones/pkg/util/errors"
 	"agones.dev/agones/pkg/util/logfields"
 	"agones.dev/agones/pkg/util/runtime"
 	"github.com/sirupsen/logrus"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/labels"
 )
+
+var errs = errors.FromPackage()
 
 func loggerForGameServerSetKey(log *logrus.Entry, key string) *logrus.Entry {
 	return logfields.AugmentLogEntry(log, logfields.GameServerSetKey, key)

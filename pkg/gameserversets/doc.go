@@ -15,7 +15,3 @@
 // Package gameserversets handles management of the
 // GameServerSet Custom Resource Definition
 package gameserversets
-
-import "agones.dev/agones/pkg/util/errors"
-
-var errs = errors.FromPackage()
