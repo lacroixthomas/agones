@@ -20,7 +20,6 @@ import (
 	"os"
 	"time"
 
-	"agones.dev/agones/pkg/util/errors"
 	"agones.dev/agones/pkg/util/httpserver"
 	"cloud.google.com/go/compute/metadata"
 	"contrib.go.opencensus.io/exporter/prometheus"
@@ -31,8 +30,6 @@ import (
 	"go.opencensus.io/stats/view"
 	"google.golang.org/genproto/googleapis/api/monitoredres"
 )
-
-var errs = errors.FromPackage()
 
 // Config holds configuration for metrics reporting
 type Config struct {
