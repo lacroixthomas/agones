@@ -12,6 +12,8 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-// Package gameserverallocations handles management of
-// allocating Ready GameServers via selectors
 package gameserverallocations
+
+import "agones.dev/agones/pkg/util/errors"
+
+var errs = errors.FromPackage()
