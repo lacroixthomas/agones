@@ -16,4 +16,4 @@ package v1
 
 import "agones.dev/agones/pkg/util/errors"
 
-var errs = errors.FromPackage()
+var gameserverErrors = errors.FromStruct[GameServer](nil)
