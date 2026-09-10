@@ -22,6 +22,7 @@ import (
 	"net"
 	"os"
 	"os/exec"
+	"regexp"
 	"slices"
 	"sort"
 	"strconv"
@@ -54,6 +55,13 @@ import (
 const (
 	fakeIPAddress = "192.1.1.2"
 )
+
+// pkgPrefixRE matches the "agones.dev/agones/<path>[.<Struct>]: " prefixes that
+// agones.dev/agones/pkg/util/errors adds to error messages to identify their
+// origin. These prefixes can appear multiple times in a single error message
+// (e.g. once per wrapping layer), so they are stripped before comparing SDK
+// error replies against expected error text.
+var pkgPrefixRE = regexp.MustCompile(`agones\.dev/agones/\S+: `)
 
 func TestCreateConnect(t *testing.T) {
 	t.Parallel()
@@ -1748,7 +1756,7 @@ func TestCounters(t *testing.T) {
 			reply, err := framework.SendGameServerUDP(t, gs, testCase.msg)
 			require.NoError(t, err)
 			if strings.HasPrefix(reply, "ERROR: ") {
-				assert.Contains(t, reply, testCase.want)
+				assert.Contains(t, pkgPrefixRE.ReplaceAllString(reply, ""), testCase.want)
 			} else {
 				assert.Equal(t, testCase.want, reply)
 			}
@@ -1874,7 +1882,7 @@ func TestLists(t *testing.T) {
 			reply, err := framework.SendGameServerUDP(t, gs, testCase.msg)
 			require.NoError(t, err)
 			if strings.HasPrefix(reply, "ERROR: ") {
-				assert.Contains(t, reply, testCase.want)
+				assert.Contains(t, pkgPrefixRE.ReplaceAllString(reply, ""), testCase.want)
 			} else {
 				assert.Equal(t, testCase.want, reply)
 			}
