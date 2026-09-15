@@ -21,6 +21,7 @@ import (
 	"net/http"
 	"time"
 
+	"agones.dev/agones/pkg/util/errors"
 	"agones.dev/agones/pkg/util/runtime"
 	"github.com/sirupsen/logrus"
 )
@@ -28,6 +29,8 @@ import (
 // readHeaderTimeout bounds how long a client may take to send its request
 // headers, so a Slowloris client cannot hold the listener open indefinitely.
 const readHeaderTimeout = 60 * time.Second
+
+var errs = errors.FromPackage()
 
 // Server is a HTTPs server that conforms to the runner interface
 // we use in /cmd/controller.
