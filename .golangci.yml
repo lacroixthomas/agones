@@ -32,6 +32,7 @@ linters:
     - bidichk
     - bodyclose
     - copyloopvar
+    - depguard
     - dupl
     - durationcheck
     - errname
@@ -56,6 +57,13 @@ linters:
     - unparam
     - wastedassign
   settings:
+    depguard:
+      rules:
+        main:
+          deny:
+            # Disallow direct usage of github.com/pkg/errors in favor of the internal errors package
+            - pkg: github.com/pkg/errors
+              desc: use agones.dev/agones/pkg/util/errors instead
     goconst:
       # Table-driven tests repeat literals by nature; hoisting them into
       # constants hurts readability more than it helps.
