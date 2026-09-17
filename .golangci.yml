@@ -162,6 +162,11 @@ linters:
       - path: (.+)_test\.go|^test/
         linters: [noctx]
 
+      # Depguard is skipped for test files to allow the use of banned
+      # dependencies like github.com/pkg/errors
+      - path: (.+)_test\.go|^test/
+        linters: [depguard]
+
       # Tests legitimately do the things gosec is looking for: weak RNG for
       # fixtures (G404), reading files named by a variable (G304), permissive
       # temp-dir permissions (G301/G306). None of it ships.
