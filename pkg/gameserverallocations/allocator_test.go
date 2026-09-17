@@ -1133,6 +1133,11 @@ func TestAllocatorCreateRestClientError(t *testing.T) {
 }
 
 func TestAllocatorListenAndBatchAllocate(t *testing.T) {
+	t.Cleanup(func() {
+		runtime.FeatureTestMutex.Lock()
+		defer runtime.FeatureTestMutex.Unlock()
+		require.NoError(t, runtime.ParseFeatures(""))
+	})
 	t.Parallel()
 
 	runtime.FeatureTestMutex.Lock()
@@ -1330,6 +1335,11 @@ func newFakeAllocatorWithCustomBatchWaitTime(batchWaitTime time.Duration) (*Allo
 }
 
 func TestAllocatorAllocateNoQuickNoGameServerError(t *testing.T) {
+	t.Cleanup(func() {
+		runtime.FeatureTestMutex.Lock()
+		defer runtime.FeatureTestMutex.Unlock()
+		require.NoError(t, runtime.ParseFeatures(""))
+	})
 	t.Parallel()
 
 	// TODO: remove when CountsAndLists and ProcessorAllocator feature flags are moved to stable.
