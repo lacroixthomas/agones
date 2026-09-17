@@ -504,7 +504,7 @@ func TestAllocatorAllocateOnGameServerUpdateError(t *testing.T) {
 	_, err := a.allocate(ctx, gsa.DeepCopy())
 	log.WithError(err).Info("allocate (private): failed allocation")
 	require.NotEqual(t, ErrNoGameServer, err)
-	require.True(t, errors.Is(err, ErrGameServerUpdateConflict))
+	require.ErrorIs(t, err, ErrGameServerUpdateConflict)
 
 	// make sure we aren't in the same batch!
 	time.Sleep(2 * a.batchWaitTime)
@@ -1015,7 +1015,7 @@ func TestControllerAllocationUpdateWorkers(t *testing.T) {
 		r = <-r.request.response
 
 		assert.True(t, updated)
-		assert.True(t, errors.Is(r.err, ErrGameServerUpdateConflict))
+		assert.ErrorIs(t, r.err, ErrGameServerUpdateConflict)
 		assert.ErrorContains(t, r.err, "something went wrong")
 		assert.Equal(t, gs1, r.gs)
 		agtesting.AssertNoEvent(t, m.FakeRecorder.Events)
@@ -1273,7 +1273,7 @@ func TestAllocatorListenAndBatchAllocate(t *testing.T) {
 
 		res1 := <-j1.response
 		assert.Error(t, res1.err)
-		assert.True(t, errors.Is(res1.err, ErrGameServerUpdateConflict))
+		assert.ErrorIs(t, res1.err, ErrGameServerUpdateConflict)
 	})
 
 	t.Run("no game servers returns error", func(t *testing.T) {
@@ -1367,7 +1367,7 @@ func TestAllocatorAllocateNoQuickNoGameServerError(t *testing.T) {
 	require.NoError(t, a.Run(ctx))
 	require.Eventuallyf(t, func() bool {
 		return a.allocationCache.cache.Len() == gsLen
-	}, 10*time.Second, time.Second, fmt.Sprintf("should be %d items in the cache", gsLen))
+	}, 10*time.Second, time.Second, "should be %d items in the cache", gsLen)
 
 	ALLOCATED := agonesv1.GameServerStateAllocated
 	gsa := &allocationv1.GameServerAllocation{
@@ -1387,29 +1387,25 @@ func TestAllocatorAllocateNoQuickNoGameServerError(t *testing.T) {
 
 	var waitTest sync.WaitGroup
 
-	waitTest.Add(1)
-	go func() {
-		defer waitTest.Done()
+	waitTest.Go(func() {
 		result1, err1 := a.Allocate(ctx, gsa.DeepCopy())
-		require.NoError(t, err1)
-		require.NotNil(t, result1)
+		assert.NoError(t, err1)
+		assert.NotNil(t, result1)
 		outGsa := result1.(*allocationv1.GameServerAllocation)
-		require.NotNil(t, outGsa)
-		require.Equal(t, allocationv1.GameServerAllocationAllocated, outGsa.Status.State)
-		require.Equal(t, gs1.ObjectMeta.Name, outGsa.Status.GameServerName)
-	}()
+		assert.NotNil(t, outGsa)
+		assert.Equal(t, allocationv1.GameServerAllocationAllocated, outGsa.Status.State)
+		assert.Equal(t, gs1.ObjectMeta.Name, outGsa.Status.GameServerName)
+	})
 
-	waitTest.Add(1)
-	go func() {
-		defer waitTest.Done()
+	waitTest.Go(func() {
 		result2, err2 := a.Allocate(ctx, gsa.DeepCopy())
-		require.NoError(t, err2)
-		require.NotNil(t, result2)
+		assert.NoError(t, err2)
+		assert.NotNil(t, result2)
 		outGsa := result2.(*allocationv1.GameServerAllocation)
-		require.NotNil(t, outGsa)
-		require.Equal(t, allocationv1.GameServerAllocationAllocated, outGsa.Status.State)
-		require.Equal(t, gs1.ObjectMeta.Name, outGsa.Status.GameServerName)
-	}()
+		assert.NotNil(t, outGsa)
+		assert.Equal(t, allocationv1.GameServerAllocationAllocated, outGsa.Status.State)
+		assert.Equal(t, gs1.ObjectMeta.Name, outGsa.Status.GameServerName)
+	})
 
 	waitTest.Wait()
 }

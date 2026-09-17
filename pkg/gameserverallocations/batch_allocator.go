@@ -17,13 +17,13 @@ package gameserverallocations
 import (
 	"context"
 	goErrors "errors"
+	"maps"
 	"time"
 
 	"agones.dev/agones/pkg/apis"
 	agonesv1 "agones.dev/agones/pkg/apis/agones/v1"
 	allocationv1 "agones.dev/agones/pkg/apis/allocation/v1"
 	"agones.dev/agones/pkg/util/runtime"
-	"github.com/pkg/errors"
 	corev1 "k8s.io/api/core/v1"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 )
@@ -41,7 +41,7 @@ type batchResponses struct {
 func (c *Allocator) batchAllocationUpdateWorkers(ctx context.Context, workerCount int) chan<- batchResponses {
 	batchUpdateQueue := make(chan batchResponses)
 
-	for i := 0; i < workerCount; i++ {
+	for range workerCount {
 		go func() {
 			for {
 				select {
@@ -164,7 +164,7 @@ func (c *Allocator) ListenAndBatchAllocate(ctx context.Context, updateWorkerCoun
 			existingBatch, alreadyAllocated := batchResponsesPerGs[string(foundGs.UID)]
 			if !alreadyAllocated {
 				if removeErr := c.allocationCache.RemoveGameServer(foundGs); removeErr != nil {
-					removeErr = errors.Wrap(removeErr, "error removing gameserver from cache")
+					removeErr = c.errs.Wrap(removeErr, "error removing gameserver from cache")
 					req.response <- response{request: req, gs: nil, err: removeErr}
 					list = append(list[:foundGsIndex], list[foundGsIndex+1:]...)
 					continue
@@ -220,14 +220,10 @@ func (c *Allocator) applyAllocationToLocalGameServer(mp allocationv1.MetaPatch, 
 		if gs.ObjectMeta.Labels == nil {
 			gs.ObjectMeta.Labels = make(map[string]string, len(mp.Labels))
 		}
-		for key, value := range mp.Labels {
-			gs.ObjectMeta.Labels[key] = value
-		}
+		maps.Copy(gs.ObjectMeta.Labels, mp.Labels)
 	}
 
-	for key, value := range mp.Annotations {
-		gs.ObjectMeta.Annotations[key] = value
-	}
+	maps.Copy(gs.ObjectMeta.Annotations, mp.Annotations)
 
 	if runtime.FeatureEnabled(runtime.FeatureCountsAndLists) {
 		if gsa.Spec.Counters != nil {
@@ -237,7 +233,7 @@ func (c *Allocator) applyAllocationToLocalGameServer(mp allocationv1.MetaPatch, 
 		}
 		if gsa.Spec.Lists != nil {
 			for list, la := range gsa.Spec.Lists {
-				listErrors = goErrors.Join(listErrors, la.ListActions(list, gs))
+				listErrors = goErrors.Join(listErrors, la.ListActions(list, gs, c.listMaxCapacity))
 			}
 		}
 	}

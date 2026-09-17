@@ -701,7 +701,7 @@ func TestAllocationCacheReorderGameServerAfterAllocation(t *testing.T) {
 		gsToReorderIndex int
 		want             []*agonesv1.GameServer
 	}{
-		"pakced (no change)": {
+		"packed (no change)": {
 			list:             []*agonesv1.GameServer{&gs0Allocated, &gs1, &gs2, &gs3},
 			gsToReorder:      &gs1Allocated,
 			gsToReorderIndex: 1,
@@ -830,10 +830,10 @@ func TestAllocationCacheReorderGameServerAfterAllocation(t *testing.T) {
 			defer cancel()
 
 			err := cache.syncCache()
-			assert.Nil(t, err)
+			assert.NoError(t, err)
 
 			err = cache.counter.Run(ctx, 0)
-			assert.Nil(t, err)
+			assert.NoError(t, err)
 
 			strategy := apis.Packed
 			if testScenario.packingStrategy != "" {
