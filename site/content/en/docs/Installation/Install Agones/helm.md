@@ -8,9 +8,15 @@ description: >
 
 ## Prerequisites
 
+{{% feature expiryVersion="1.61.0" %}}
 - [Helm](https://helm.sh/) package manager 3.2.3+
+{{% /feature %}}
+{{% feature publishVersion="1.61.0" %}}
+- [Helm](https://helm.sh/) package manager 4.1.3+
+{{% /feature %}}
 - [Supported Kubernetes Cluster]({{< relref "../_index.md#usage-requirements" >}})
 
+{{% feature expiryVersion="1.61.0" %}}
 ## Helm 3
 
 ### Installing the Chart
@@ -46,6 +52,29 @@ Helm install or Helm upgrade with the Helm flag `--skip-schema-validation`.
 List all releases using `helm list --all-namespaces`
 {{% /alert %}}
 
+### Namespaces
+
+By default Agones is configured to work with game servers deployed in the `default` namespace. If
+you are planning to use another namespace you can configure Agones via the parameter `gameservers.namespaces`.
+
+For example to use `default` **and** `xbox` namespaces:
+
+```bash
+kubectl create namespace xbox
+helm install my-release agones/agones --set "gameservers.namespaces={default,xbox}" --namespace agones-system
+```
+
+{{% alert title="Note" color="info" %}}
+You need to create your namespaces before installing Agones.
+{{% /alert %}}
+
+If you want to add a new namespace afterward upgrade your release:
+
+```bash
+kubectl create namespace ps4
+helm upgrade my-release agones/agones --reuse-values --set "gameservers.namespaces={default,xbox,ps4}" --namespace agones-system
+```
+
 ### Uninstalling the Chart
 
 To uninstall/delete the `my-release` deployment:
@@ -53,6 +82,7 @@ To uninstall/delete the `my-release` deployment:
 ```bash
 helm uninstall my-release --namespace=agones-system
 ```
+{{% /feature %}}
 
 {{% feature publishVersion="1.61.0" %}}
 ## Helm 4
@@ -98,16 +128,7 @@ client-side apply behavior with `--server-side=false`. Also, the `--atomic` flag
 flag still works but is deprecated.
 {{% /alert %}}
 
-### Uninstalling the Chart
-
-To uninstall/delete the `my-release` deployment:
-
-```bash
-helm uninstall my-release --namespace=agones-system
-```
-{{% /feature %}}
-
-## Namespaces
+### Namespaces
 
 By default Agones is configured to work with game servers deployed in the `default` namespace. If
 you are planning to use another namespace you can configure Agones via the parameter `gameservers.namespaces`.
@@ -129,6 +150,15 @@ If you want to add a new namespace afterward upgrade your release:
 kubectl create namespace ps4
 helm upgrade my-release agones/agones --reuse-values --set "gameservers.namespaces={default,xbox,ps4}" --namespace agones-system
 ```
+
+### Uninstalling the Chart
+
+To uninstall/delete the `my-release` deployment:
+
+```bash
+helm uninstall my-release --namespace=agones-system
+```
+{{% /feature %}}
 
 ## RBAC
 
