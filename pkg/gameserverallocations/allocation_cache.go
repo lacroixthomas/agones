@@ -279,7 +279,8 @@ func (c *AllocationCache) ReorderGameServerAfterAllocation(
 	gsList []*agonesv1.GameServer,
 	gsIndexBeforeAllocation int, gsAfterAllocation *agonesv1.GameServer,
 	priorities []agonesv1.Priority, strategy apis.SchedulingStrategy) {
-	if len(gsList) == 0 || gsIndexBeforeAllocation < 0 || gsIndexBeforeAllocation >= len(gsList) || gsAfterAllocation == nil {
+	if len(gsList) == 0 || gsIndexBeforeAllocation < 0 || gsIndexBeforeAllocation >= len(gsList) ||
+		gsList[gsIndexBeforeAllocation] == nil || gsAfterAllocation == nil {
 		c.baseLogger.WithField("gsIndexBeforeAllocation", gsIndexBeforeAllocation).
 			WithField("gsAfterAllocation", gsAfterAllocation).
 			WithField("gsListLength", len(gsList)).
@@ -386,6 +387,9 @@ func compareGameServersAfterAllocationForDistributedStrategy(
 // compareGameServersForPackedStrategy compares two game servers for the packed strategy with
 // lexicographic tie-breaking for a stable sort order.
 func compareGameServersForPackedStrategy(gs0, gs1 *agonesv1.GameServer, priorities []agonesv1.Priority, counts map[string]gameservers.NodeCount) bool {
+	if gs1 == nil {
+		return true
+	}
 	greater, equal := compareGameServersAfterAllocationForPackedStrategy(gs0, gs1, priorities, counts)
 	if !equal {
 		return greater
@@ -396,6 +400,9 @@ func compareGameServersForPackedStrategy(gs0, gs1 *agonesv1.GameServer, prioriti
 // compareGameServersForDistributedStrategy compares two game servers for the distributed strategy with
 // lexicographic tie-breaking for a stable sort order.
 func compareGameServersForDistributedStrategy(gs0, gs1 *agonesv1.GameServer, priorities []agonesv1.Priority) bool {
+	if gs1 == nil {
+		return true
+	}
 	greater, equal := compareGameServersAfterAllocationForDistributedStrategy(gs0, gs1, priorities)
 	if !equal {
 		return greater

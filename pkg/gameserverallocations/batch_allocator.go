@@ -176,7 +176,8 @@ func (c *Allocator) ListenAndBatchAllocate(ctx context.Context, updateWorkerCoun
 				if removeErr := c.allocationCache.RemoveGameServer(foundGs); removeErr != nil {
 					removeErr = c.errs.Wrap(removeErr, "error removing gameserver from cache")
 					req.response <- response{request: req, gs: nil, err: removeErr}
-					list = append(list[:foundGsIndex], list[foundGsIndex+1:]...)
+					// Setting the entry to nil to mark the gameserver as errored/removed from the list
+					list[foundGsIndex] = nil
 					continue
 				}
 			}
