@@ -25,6 +25,7 @@ import (
 	allocationv1 "agones.dev/agones/pkg/apis/allocation/v1"
 	"agones.dev/agones/pkg/util/runtime"
 	corev1 "k8s.io/api/core/v1"
+	k8serrors "k8s.io/apimachinery/pkg/api/errors"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 )
 
@@ -52,8 +53,15 @@ func (c *Allocator) batchAllocationUpdateWorkers(ctx context.Context, workerCoun
 						var propagatedErr error
 						updatedGs, updateErr := c.gameServerGetter.GameServers(lastGsState.ObjectMeta.Namespace).Update(ctx, lastGsState, metav1.UpdateOptions{})
 						if updateErr != nil {
-							c.allocationCache.AddGameServer(lastGsState)
-							propagatedErr = goErrors.Join(ErrGameServerUpdateConflict, updateErr)
+							if !k8serrors.IsConflict(updateErr) {
+								// since we could not allocate, we should put it back
+								// but not if it's a conflict, as the cache is no longer up to date, and
+								// we should wait for it to get updated with fresh info.
+								c.allocationCache.AddGameServer(lastGsState)
+								propagatedErr = goErrors.Join(ErrGameServerUpdateConflict, updateErr)
+							} else {
+								propagatedErr = updateErr
+							}
 						} else {
 							c.allocationCache.AddGameServer(updatedGs)
 
@@ -98,10 +106,12 @@ func (c *Allocator) ListenAndBatchAllocate(ctx context.Context, updateWorkerCoun
 	batchResponsesPerGs := make(map[string]batchResponses)
 
 	flush := func() {
-		for _, batchRes := range batchResponsesPerGs {
-			batchUpdateQueue <- batchRes
+		if len(batchResponsesPerGs) > 0 {
+			for _, batchRes := range batchResponsesPerGs {
+				batchUpdateQueue <- batchRes
+			}
+			batchResponsesPerGs = make(map[string]batchResponses)
 		}
-		batchResponsesPerGs = make(map[string]batchResponses)
 
 		list = nil
 		requestCount = 0
@@ -192,7 +202,6 @@ func (c *Allocator) ListenAndBatchAllocate(ctx context.Context, updateWorkerCoun
 			}
 
 		case <-ctx.Done():
-			flush()
 			return
 
 		default:
