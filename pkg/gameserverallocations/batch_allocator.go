@@ -58,9 +58,9 @@ func (c *Allocator) batchAllocationUpdateWorkers(ctx context.Context, workerCoun
 								// but not if it's a conflict, as the cache is no longer up to date, and
 								// we should wait for it to get updated with fresh info.
 								c.allocationCache.AddGameServer(lastGsState)
-								propagatedErr = goErrors.Join(ErrGameServerUpdateConflict, updateErr)
-							} else {
 								propagatedErr = updateErr
+							} else {
+								propagatedErr = goErrors.Join(ErrGameServerUpdateConflict, updateErr)
 							}
 						} else {
 							c.allocationCache.AddGameServer(updatedGs)
