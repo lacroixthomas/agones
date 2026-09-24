@@ -267,6 +267,10 @@ func (c *Allocator) findGameServerForBatchAllocation(gsa *allocationv1.GameServe
 	var loop func(list []*agonesv1.GameServer, f func(i int, gs *agonesv1.GameServer))
 
 	// packed is forward looping, distributed is random looping
+	// TODO: this duplicates the scheduling switch in findGameServerForAllocation (find.go)
+	// Once FeatureCountsAndLists is stable, batch allocation should replace that function and this
+	// block should move to find.go instead of being duplicated here.
+	// nolint:dupl // Linter errors on lines are duplicate of findGameServerForAllocation in find.go
 	switch gsa.Spec.Scheduling {
 	case apis.Packed:
 		loop = func(list []*agonesv1.GameServer, f func(i int, gs *agonesv1.GameServer)) {

@@ -1309,6 +1309,203 @@ func TestAllocatorListenAndBatchAllocate(t *testing.T) {
 	})
 }
 
+func TestAllocatorListenAndBatchAllocateCountsAndLists(t *testing.T) {
+	t.Cleanup(func() {
+		runtime.FeatureTestMutex.Lock()
+		defer runtime.FeatureTestMutex.Unlock()
+		require.NoError(t, runtime.ParseFeatures(""))
+	})
+	t.Parallel()
+
+	runtime.FeatureTestMutex.Lock()
+	defer runtime.FeatureTestMutex.Unlock()
+	require.NoError(t, runtime.ParseFeatures(string(runtime.FeatureProcessorAllocator)+"=true&"+string(runtime.FeatureCountsAndLists)+"=true"))
+
+	allocated := agonesv1.GameServerStateAllocated
+
+	t.Run("joining an already-allocated list rejects the request once it is full", func(t *testing.T) {
+		// alice already holds the GameServer's one existing slot, representing a session in
+		// progress that bob and carol are both trying to join in the same batch window
+		f, gsList := defaultFixtures(1)
+		gsList[0].Status.State = agonesv1.GameServerStateAllocated
+		gsList[0].Status.Lists = map[string]agonesv1.ListStatus{
+			"players": {Values: []string{"alice"}, Capacity: 2},
+		}
+
+		a, m := newFakeAllocator()
+		m.AgonesClient.AddReactor("list", "gameservers", func(_ k8stesting.Action) (bool, k8sruntime.Object, error) {
+			return true, &agonesv1.GameServerList{Items: gsList}, nil
+		})
+		updateCount := 0
+		m.AgonesClient.AddReactor("update", "gameservers", func(action k8stesting.Action) (bool, k8sruntime.Object, error) {
+			updateCount++
+			uo := action.(k8stesting.UpdateAction)
+			gs := uo.GetObject().(*agonesv1.GameServer)
+			return true, gs, nil
+		})
+
+		ctx, cancel := agtesting.StartInformers(m, a.allocationCache.gameServerSynced)
+		defer cancel()
+
+		err := a.allocationCache.syncCache()
+		assert.NoError(t, err)
+		err = a.allocationCache.counter.Run(ctx, 0)
+		assert.NoError(t, err)
+
+		newGsa := func(value string) *allocationv1.GameServerAllocation {
+			gsa := &allocationv1.GameServerAllocation{
+				ObjectMeta: metav1.ObjectMeta{Namespace: defaultNs},
+				Spec: allocationv1.GameServerAllocationSpec{
+					Selectors: []allocationv1.GameServerSelector{{
+						LabelSelector:   metav1.LabelSelector{MatchLabels: map[string]string{agonesv1.FleetNameLabel: f.ObjectMeta.Name}},
+						GameServerState: &allocated,
+					}},
+					Lists: map[string]allocationv1.ListAction{"players": {AddValues: []string{value}}},
+				},
+			}
+			gsa.ApplyDefaults()
+			return gsa
+		}
+
+		// Expect that bob will be allocated successfully, and carol will be rejected due to the list being full
+		jBob := request{gsa: newGsa("bob"), response: make(chan response, 1), ctx: context.Background()}
+		jCarol := request{gsa: newGsa("carol"), response: make(chan response, 1), ctx: context.Background()}
+		a.pendingRequests <- jBob
+		a.pendingRequests <- jCarol
+
+		go a.ListenAndBatchAllocate(ctx, 3)
+
+		resBob := <-jBob.response
+		assert.NoError(t, resBob.err)
+		require.NotNil(t, resBob.gs)
+		assert.ElementsMatch(t, []string{"alice", "bob"}, resBob.gs.Status.Lists["players"].Values)
+
+		resCarol := <-jCarol.response
+		assert.Nil(t, resCarol.gs)
+		assert.ErrorIs(t, resCarol.err, ErrConflictInGameServerSelection)
+
+		assert.Equal(t, 1, updateCount)
+	})
+
+	t.Run("incrementing a counter within a batch rejects the request once it is full", func(t *testing.T) {
+		// the "rooms" counter already has 9 of its 10 units used, leaving room for exactly one
+		// more increment of 1 within the batch.
+		f, gsList := defaultFixtures(1)
+		gsList[0].Status.State = agonesv1.GameServerStateAllocated
+		gsList[0].Status.Counters = map[string]agonesv1.CounterStatus{
+			"rooms": {Count: 9, Capacity: 10},
+		}
+
+		a, m := newFakeAllocator()
+		m.AgonesClient.AddReactor("list", "gameservers", func(_ k8stesting.Action) (bool, k8sruntime.Object, error) {
+			return true, &agonesv1.GameServerList{Items: gsList}, nil
+		})
+		updateCount := 0
+		m.AgonesClient.AddReactor("update", "gameservers", func(action k8stesting.Action) (bool, k8sruntime.Object, error) {
+			updateCount++
+			uo := action.(k8stesting.UpdateAction)
+			gs := uo.GetObject().(*agonesv1.GameServer)
+			return true, gs, nil
+		})
+
+		ctx, cancel := agtesting.StartInformers(m, a.allocationCache.gameServerSynced)
+		defer cancel()
+
+		err := a.allocationCache.syncCache()
+		assert.NoError(t, err)
+		err = a.allocationCache.counter.Run(ctx, 0)
+		assert.NoError(t, err)
+
+		increment := "Increment"
+		one := int64(1)
+		newGsa := func() *allocationv1.GameServerAllocation {
+			gsa := &allocationv1.GameServerAllocation{
+				ObjectMeta: metav1.ObjectMeta{Namespace: defaultNs},
+				Spec: allocationv1.GameServerAllocationSpec{
+					Selectors: []allocationv1.GameServerSelector{{
+						LabelSelector:   metav1.LabelSelector{MatchLabels: map[string]string{agonesv1.FleetNameLabel: f.ObjectMeta.Name}},
+						GameServerState: &allocated,
+					}},
+					Counters: map[string]allocationv1.CounterAction{"rooms": {Action: &increment, Amount: &one}},
+				},
+			}
+			gsa.ApplyDefaults()
+			return gsa
+		}
+
+		// Expect that the first request will succeed and the second will fail due to the counter being full
+		j1 := request{gsa: newGsa(), response: make(chan response, 1), ctx: context.Background()}
+		j2 := request{gsa: newGsa(), response: make(chan response, 1), ctx: context.Background()}
+		a.pendingRequests <- j1
+		a.pendingRequests <- j2
+
+		go a.ListenAndBatchAllocate(ctx, 3)
+
+		res1 := <-j1.response
+		assert.NoError(t, res1.err)
+		require.NotNil(t, res1.gs)
+		assert.Equal(t, int64(10), res1.gs.Status.Counters["rooms"].Count)
+
+		res2 := <-j2.response
+		assert.Nil(t, res2.gs)
+		assert.ErrorIs(t, res2.err, ErrConflictInGameServerSelection)
+
+		assert.Equal(t, 1, updateCount)
+	})
+
+	t.Run("a full game server is skipped in favour of one with room, through the real cache and batch loop", func(t *testing.T) {
+		f, gsList := defaultFixtures(2)
+		gsList[0].Status.Lists = map[string]agonesv1.ListStatus{
+			"players": {Values: []string{"alice", "bob"}, Capacity: 2},
+		}
+		gsList[1].Status.Lists = map[string]agonesv1.ListStatus{
+			"players": {Values: []string{}, Capacity: 2},
+		}
+
+		a, m := newFakeAllocator()
+		m.AgonesClient.AddReactor("list", "gameservers", func(_ k8stesting.Action) (bool, k8sruntime.Object, error) {
+			return true, &agonesv1.GameServerList{Items: gsList}, nil
+		})
+		updateCount := 0
+		m.AgonesClient.AddReactor("update", "gameservers", func(action k8stesting.Action) (bool, k8sruntime.Object, error) {
+			updateCount++
+			uo := action.(k8stesting.UpdateAction)
+			gs := uo.GetObject().(*agonesv1.GameServer)
+			return true, gs, nil
+		})
+
+		ctx, cancel := agtesting.StartInformers(m, a.allocationCache.gameServerSynced)
+		defer cancel()
+
+		err := a.allocationCache.syncCache()
+		assert.NoError(t, err)
+		err = a.allocationCache.counter.Run(ctx, 0)
+		assert.NoError(t, err)
+
+		gsa := &allocationv1.GameServerAllocation{
+			ObjectMeta: metav1.ObjectMeta{Namespace: defaultNs},
+			Spec: allocationv1.GameServerAllocationSpec{
+				Selectors: []allocationv1.GameServerSelector{{LabelSelector: metav1.LabelSelector{MatchLabels: map[string]string{agonesv1.FleetNameLabel: f.ObjectMeta.Name}}}},
+				Lists:     map[string]allocationv1.ListAction{"players": {AddValues: []string{"carol"}}},
+			},
+		}
+		gsa.ApplyDefaults()
+
+		// Expect that the first request will be allocated to the game server with available room in the list
+		j1 := request{gsa: gsa.DeepCopy(), response: make(chan response, 1), ctx: context.Background()}
+		a.pendingRequests <- j1
+
+		go a.ListenAndBatchAllocate(ctx, 3)
+
+		res1 := <-j1.response
+		assert.NoError(t, res1.err)
+		require.NotNil(t, res1.gs)
+		assert.Equal(t, gsList[1].ObjectMeta.Name, res1.gs.ObjectMeta.Name)
+		assert.ElementsMatch(t, []string{"carol"}, res1.gs.Status.Lists["players"].Values)
+		assert.Equal(t, 1, updateCount)
+	})
+}
+
 // newFakeAllocator returns a fake allocator.
 func newFakeAllocator() (*Allocator, agtesting.Mocks) {
 	return newFakeAllocatorWithCustomBatchWaitTime(500 * time.Millisecond)
