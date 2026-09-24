@@ -18,6 +18,8 @@ import (
 	"context"
 	goErrors "errors"
 	"maps"
+	"math/rand"
+	"slices"
 	"time"
 
 	"agones.dev/agones/pkg/apis"
@@ -165,7 +167,7 @@ func (c *Allocator) ListenAndBatchAllocate(ctx context.Context, updateWorkerCoun
 
 			checkRefreshList(req.gsa)
 
-			foundGs, foundGsIndex, err := findGameServerForAllocation(req.gsa, list)
+			foundGs, foundGsIndex, err := c.findGameServerForBatchAllocation(req.gsa, list)
 			if err != nil {
 				req.response <- response{request: req, gs: nil, err: err}
 				continue
@@ -249,4 +251,175 @@ func (c *Allocator) applyAllocationToLocalGameServer(mp allocationv1.MetaPatch, 
 	}
 
 	return nil, counterErrors, listErrors
+}
+
+// findGameServerForBatchAllocation finds an optimal GameServer for the batch allocator
+// Returns the first GameServer that matches the selectors and fits the allocation criteria, along with its index in the list
+// If no suitable GameServer is found, returns an error
+func (c *Allocator) findGameServerForBatchAllocation(gsa *allocationv1.GameServerAllocation, list []*agonesv1.GameServer) (*agonesv1.GameServer, int, error) {
+	type result struct {
+		gs    *agonesv1.GameServer
+		index int
+	}
+
+	selectors := make([]*result, len(gsa.Spec.Selectors))
+
+	var loop func(list []*agonesv1.GameServer, f func(i int, gs *agonesv1.GameServer))
+
+	// packed is forward looping, distributed is random looping
+	switch gsa.Spec.Scheduling {
+	case apis.Packed:
+		loop = func(list []*agonesv1.GameServer, f func(i int, gs *agonesv1.GameServer)) {
+			for i, gs := range list {
+				f(i, gs)
+			}
+		}
+	case apis.Distributed:
+		// randomised looping - make a list of indices, and then randomise them
+		// as we don't want to change the order of the gameserver slice
+		if !runtime.FeatureEnabled(runtime.FeatureCountsAndLists) || len(gsa.Spec.Priorities) == 0 {
+			l := len(list)
+			indices := make([]int, l)
+			for i := range l {
+				indices[i] = i
+			}
+			rand.Shuffle(l, func(i, j int) {
+				indices[i], indices[j] = indices[j], indices[i]
+			})
+
+			loop = func(list []*agonesv1.GameServer, f func(i int, gs *agonesv1.GameServer)) {
+				for _, i := range indices {
+					f(i, list[i])
+				}
+			}
+		} else {
+			// For FeatureCountsAndLists we do not do randomized looping -- instead choose the game
+			// server based on the list of Priorities. (The order in which the game servers were sorted
+			// in ListSortedGameServersPriorities.)
+			loop = func(list []*agonesv1.GameServer, f func(i int, gs *agonesv1.GameServer)) {
+				for i, gs := range list {
+					f(i, gs)
+				}
+			}
+		}
+	default:
+		return nil, -1, errs.Errorf("scheduling strategy of '%s' is not supported", gsa.Spec.Scheduling)
+	}
+
+	var fits func(*agonesv1.GameServer) bool
+	if runtime.FeatureEnabled(runtime.FeatureCountsAndLists) {
+		fits = counterAndListActionsFit(gsa)
+	}
+
+	matchedButFull := false
+
+	loop(list, func(i int, gs *agonesv1.GameServer) {
+		if gs == nil {
+			return
+		}
+
+		// only search the same namespace
+		if gs.ObjectMeta.Namespace != gsa.ObjectMeta.Namespace {
+			return
+		}
+
+		for j, sel := range gsa.Spec.Selectors {
+			if selectors[j] != nil || !sel.Matches(gs) {
+				continue
+			}
+
+			if fits != nil && !fits(gs) {
+				matchedButFull = true
+				continue
+			}
+
+			selectors[j] = &result{gs: gs, index: i}
+		}
+	})
+
+	for _, r := range selectors {
+		if r != nil {
+			return r.gs, r.index, nil
+		}
+	}
+
+	if matchedButFull {
+		return nil, 0, ErrConflictInGameServerSelection
+	}
+
+	return nil, 0, ErrNoGameServer
+}
+
+// counterAndListActionsFit returns a function that checks if a GameServer can
+// accommodate all Counter andList actions specified in the GameServerAllocation
+func counterAndListActionsFit(gsa *allocationv1.GameServerAllocation) func(*agonesv1.GameServer) bool {
+	if len(gsa.Spec.Counters) == 0 && len(gsa.Spec.Lists) == 0 {
+		return nil
+	}
+
+	return func(gs *agonesv1.GameServer) bool {
+		for name, action := range gsa.Spec.Counters {
+			status, ok := gs.Status.Counters[name]
+			if !ok {
+				continue
+			}
+
+			capacity := status.Capacity
+			count := status.Count
+			if action.Capacity != nil {
+				capacity = *action.Capacity
+				count = min(count, capacity)
+			}
+
+			if action.Action == nil || action.Amount == nil {
+				continue
+			}
+
+			switch *action.Action {
+			case agonesv1.GameServerPriorityIncrement:
+				if count+*action.Amount > capacity {
+					return false
+				}
+			case agonesv1.GameServerPriorityDecrement:
+				if *action.Amount > count {
+					return false
+				}
+			}
+		}
+
+		for name, action := range gsa.Spec.Lists {
+			status, ok := gs.Status.Lists[name]
+			if !ok {
+				continue
+			}
+
+			if len(action.AddValues) == 0 {
+				continue
+			}
+
+			capacity := status.Capacity
+			if action.Capacity != nil {
+				capacity = *action.Capacity
+			}
+
+			needed := 0
+			seen := make(map[string]bool, len(action.AddValues))
+			for _, v := range action.AddValues {
+				if seen[v] {
+					continue
+				}
+				seen[v] = true
+				if slices.Contains(status.Values, v) {
+					continue
+				}
+				needed++
+			}
+
+			if int64(len(status.Values)+needed) > capacity {
+				return false
+			}
+		}
+
+		return true
+	}
 }
