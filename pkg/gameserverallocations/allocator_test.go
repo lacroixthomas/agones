@@ -1138,7 +1138,6 @@ func TestAllocatorListenAndBatchAllocate(t *testing.T) {
 		defer runtime.FeatureTestMutex.Unlock()
 		require.NoError(t, runtime.ParseFeatures(""))
 	})
-	t.Parallel()
 
 	runtime.FeatureTestMutex.Lock()
 	defer runtime.FeatureTestMutex.Unlock()
@@ -1315,7 +1314,6 @@ func TestAllocatorListenAndBatchAllocateCountsAndLists(t *testing.T) {
 		defer runtime.FeatureTestMutex.Unlock()
 		require.NoError(t, runtime.ParseFeatures(""))
 	})
-	t.Parallel()
 
 	runtime.FeatureTestMutex.Lock()
 	defer runtime.FeatureTestMutex.Unlock()
@@ -1537,7 +1535,6 @@ func TestAllocatorAllocateNoQuickNoGameServerError(t *testing.T) {
 		defer runtime.FeatureTestMutex.Unlock()
 		require.NoError(t, runtime.ParseFeatures(""))
 	})
-	t.Parallel()
 
 	// TODO: remove when CountsAndLists and ProcessorAllocator feature flags are moved to stable.
 	runtime.FeatureTestMutex.Lock()
