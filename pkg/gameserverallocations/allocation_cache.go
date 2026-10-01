@@ -194,7 +194,7 @@ func (c *AllocationCache) ListSortedGameServers(gsa *allocationv1.GameServerAllo
 	counts := c.counter.Counts()
 
 	var priorities []agonesv1.Priority
-	if runtime.FeatureEnabled(runtime.FeatureCountsAndLists) && gsa != nil {
+	if gsa != nil {
 		priorities = gsa.Spec.Priorities
 	}
 	sort.Slice(list, func(i, j int) bool {
@@ -213,7 +213,7 @@ func (c *AllocationCache) ListSortedGameServersPriorities(gsa *allocationv1.Game
 	}
 
 	var priorities []agonesv1.Priority
-	if runtime.FeatureEnabled(runtime.FeatureCountsAndLists) && gsa != nil {
+	if gsa != nil {
 		priorities = gsa.Spec.Priorities
 	}
 	sort.Slice(list, func(i, j int) bool {
@@ -379,7 +379,7 @@ func compareGameServersAfterAllocationForPackedStrategy(
 		return true, false
 	}
 
-	if runtime.FeatureEnabled(runtime.FeatureCountsAndLists) && priorities != nil {
+	if priorities != nil {
 		if res := before.CompareCountAndListPriorities(priorities, after); res != nil {
 			return *res, false
 		}
@@ -393,7 +393,7 @@ func compareGameServersAfterAllocationForPackedStrategy(
 func compareGameServersAfterAllocationForDistributedStrategy(
 	before, after *agonesv1.GameServer,
 	priorities []agonesv1.Priority) (bool, bool) {
-	if runtime.FeatureEnabled(runtime.FeatureCountsAndLists) && priorities != nil {
+	if priorities != nil {
 		if res := before.CompareCountAndListPriorities(priorities, after); res != nil {
 			return *res, false
 		}

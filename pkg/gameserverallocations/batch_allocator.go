@@ -18,14 +18,12 @@ import (
 	"context"
 	goErrors "errors"
 	"maps"
-	"math/rand"
 	"slices"
 	"time"
 
 	"agones.dev/agones/pkg/apis"
 	agonesv1 "agones.dev/agones/pkg/apis/agones/v1"
 	allocationv1 "agones.dev/agones/pkg/apis/allocation/v1"
-	"agones.dev/agones/pkg/util/runtime"
 	corev1 "k8s.io/api/core/v1"
 	k8serrors "k8s.io/apimachinery/pkg/api/errors"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
@@ -102,7 +100,7 @@ func (c *Allocator) ListenAndBatchAllocate(ctx context.Context, updateWorkerCoun
 			}
 
 			// find a suitable GameServer for the current allocation request
-			gs, index, err := c.findGameServerForBatchAllocation(req.gsa, candidates)
+			gs, index, err := findGameServerForAllocation(req.gsa, candidates)
 			if err != nil {
 				req.response <- response{request: req, gs: nil, err: err}
 				continue
@@ -223,15 +221,15 @@ func (c *Allocator) applyRequests(gs *agonesv1.GameServer, reqs []request) (toUp
 	toUpdate = gs.DeepCopy()
 	for _, req := range reqs {
 		switch {
-		// check if the request context has expired or if the request fits the current GameServer before applying it
+		// check if the request context has expired before applying it
 		case req.ctx.Err() != nil:
 			req.response <- response{request: req, gs: nil, err: ErrTotalTimeoutExceeded}
 
-		// request does not fit the current GameServer
-		case !requestFits(req, toUpdate):
+		// the GameServer is no longer allocatable, so the request is rejected and can be retried
+		case toUpdate.IsBeingDeleted() || !readyOrAllocatedGameServerMatcher(toUpdate):
 			req.response <- response{request: req, gs: nil, err: ErrConflictInGameServerSelection}
 
-		// request fits the current GameServer and can be applied
+		// apply the request, counter and list action errors do not prevent the allocation
 		default:
 			applyErr, cErr, lErr := c.applyAllocationToLocalGameServer(req.gsa.Spec.MetaPatch, toUpdate, req.gsa)
 			if applyErr != nil {
@@ -269,17 +267,11 @@ func (c *Allocator) applyAllocationToLocalGameServer(mp allocationv1.MetaPatch, 
 
 	maps.Copy(gs.ObjectMeta.Annotations, mp.Annotations)
 
-	if runtime.FeatureEnabled(runtime.FeatureCountsAndLists) {
-		if gsa.Spec.Counters != nil {
-			for counter, ca := range gsa.Spec.Counters {
-				counterErrors = goErrors.Join(counterErrors, ca.CounterActions(counter, gs))
-			}
-		}
-		if gsa.Spec.Lists != nil {
-			for list, la := range gsa.Spec.Lists {
-				listErrors = goErrors.Join(listErrors, la.ListActions(list, gs, c.listMaxCapacity))
-			}
-		}
+	for counter, ca := range gsa.Spec.Counters {
+		counterErrors = goErrors.Join(counterErrors, ca.CounterActions(counter, gs))
+	}
+	for list, la := range gsa.Spec.Lists {
+		listErrors = goErrors.Join(listErrors, la.ListActions(list, gs, c.listMaxCapacity))
 	}
 
 	return nil, counterErrors, listErrors
@@ -298,10 +290,6 @@ func (c *Allocator) recordAllocated(gs *agonesv1.GameServer, counterErrors, list
 
 // batchSortKey returns the sort key for the given GameServerAllocation
 func (c *Allocator) batchSortKey(gsa *allocationv1.GameServerAllocation) uint64 {
-	if !runtime.FeatureEnabled(runtime.FeatureCountsAndLists) {
-		return 0
-	}
-
 	// Get the sort key for the GameServerAllocation, which determines the order in which it should be considered for allocation
 	sortKey, err := gsa.SortKey()
 	if err != nil {
@@ -314,7 +302,7 @@ func (c *Allocator) batchSortKey(gsa *allocationv1.GameServerAllocation) uint64 
 // sortedGameServers returns the list of GameServers sorted according to the allocation strategy, with pending allocations taken into account
 func (c *Allocator) sortedGameServers(gsa *allocationv1.GameServerAllocation, pending *pendingAllocations) []*agonesv1.GameServer {
 	var list []*agonesv1.GameServer
-	if !runtime.FeatureEnabled(runtime.FeatureCountsAndLists) || gsa.Spec.Scheduling == apis.Packed {
+	if gsa.Spec.Scheduling == apis.Packed {
 		list = c.allocationCache.ListSortedGameServers(gsa)
 	} else {
 		list = c.allocationCache.ListSortedGameServersPriorities(gsa)
@@ -336,193 +324,4 @@ func (c *Allocator) sortedGameServers(gsa *allocationv1.GameServerAllocation, pe
 	}
 
 	return list
-}
-
-// findGameServerForBatchAllocation finds an optimal GameServer for the batch allocator
-// It returns the first GameServer that matches the selectors and fits the allocation criteria, along with its index in the list
-// If no suitable GameServer is found, it returns an error
-func (c *Allocator) findGameServerForBatchAllocation(gsa *allocationv1.GameServerAllocation, list []*agonesv1.GameServer) (*agonesv1.GameServer, int, error) {
-	type result struct {
-		gs    *agonesv1.GameServer
-		index int
-	}
-
-	selectors := make([]*result, len(gsa.Spec.Selectors))
-
-	var loop func(list []*agonesv1.GameServer, f func(i int, gs *agonesv1.GameServer))
-
-	// nolint:dupl // Linter errors on lines are duplicate of findGameServerForAllocation in find.go
-	switch gsa.Spec.Scheduling {
-	case apis.Packed:
-		loop = func(list []*agonesv1.GameServer, f func(i int, gs *agonesv1.GameServer)) {
-			for i, gs := range list {
-				f(i, gs)
-			}
-		}
-	case apis.Distributed:
-		// randomised looping - make a list of indices, and then randomise them
-		// as we don't want to change the order of the gameserver slice
-		if !runtime.FeatureEnabled(runtime.FeatureCountsAndLists) || len(gsa.Spec.Priorities) == 0 {
-			l := len(list)
-			indices := make([]int, l)
-			for i := range l {
-				indices[i] = i
-			}
-			rand.Shuffle(l, func(i, j int) {
-				indices[i], indices[j] = indices[j], indices[i]
-			})
-
-			loop = func(list []*agonesv1.GameServer, f func(i int, gs *agonesv1.GameServer)) {
-				for _, i := range indices {
-					f(i, list[i])
-				}
-			}
-		} else {
-			// For FeatureCountsAndLists we do not do randomized looping -- instead choose the game
-			// server based on the list of Priorities. (The order in which the game servers were sorted
-			// in ListSortedGameServersPriorities.)
-			loop = func(list []*agonesv1.GameServer, f func(i int, gs *agonesv1.GameServer)) {
-				for i, gs := range list {
-					f(i, gs)
-				}
-			}
-		}
-	default:
-		return nil, -1, errs.Errorf("scheduling strategy of '%s' is not supported", gsa.Spec.Scheduling)
-	}
-
-	var fits func(*agonesv1.GameServer) bool
-	if runtime.FeatureEnabled(runtime.FeatureCountsAndLists) {
-		fits = counterAndListActionsFit(gsa)
-	}
-
-	matchedButFull := false
-
-	loop(list, func(i int, gs *agonesv1.GameServer) {
-		if gs == nil {
-			return
-		}
-
-		// only search the same namespace
-		if gs.ObjectMeta.Namespace != gsa.ObjectMeta.Namespace {
-			return
-		}
-
-		for j, sel := range gsa.Spec.Selectors {
-			if selectors[j] != nil || !sel.Matches(gs) {
-				continue
-			}
-
-			if fits != nil && !fits(gs) {
-				matchedButFull = true
-				continue
-			}
-
-			selectors[j] = &result{gs: gs, index: i}
-		}
-	})
-
-	for _, r := range selectors {
-		if r != nil {
-			return r.gs, r.index, nil
-		}
-	}
-
-	if matchedButFull {
-		return nil, 0, ErrConflictInGameServerSelection
-	}
-
-	return nil, 0, ErrNoGameServer
-}
-
-// requestFits returns true if the request can still be applied onto the GameServer.
-func requestFits(req request, gs *agonesv1.GameServer) bool {
-	if gs.IsBeingDeleted() || !readyOrAllocatedGameServerMatcher(gs) {
-		return false
-	}
-
-	if !slices.ContainsFunc(req.gsa.Spec.Selectors, func(sel allocationv1.GameServerSelector) bool { return sel.Matches(gs) }) {
-		return false
-	}
-
-	if runtime.FeatureEnabled(runtime.FeatureCountsAndLists) {
-		if fit := counterAndListActionsFit(req.gsa); fit != nil && !fit(gs) {
-			return false
-		}
-	}
-
-	return true
-}
-
-// counterAndListActionsFit returns a function that checks if a GameServer can accommodate all Counter and List actions specified in the GameServerAllocation
-func counterAndListActionsFit(gsa *allocationv1.GameServerAllocation) func(*agonesv1.GameServer) bool {
-	if len(gsa.Spec.Counters) == 0 && len(gsa.Spec.Lists) == 0 {
-		return nil
-	}
-
-	return func(gs *agonesv1.GameServer) bool {
-		for name, action := range gsa.Spec.Counters {
-			status, ok := gs.Status.Counters[name]
-			if !ok {
-				continue
-			}
-
-			capacity := status.Capacity
-			count := status.Count
-			if action.Capacity != nil {
-				capacity = *action.Capacity
-				count = min(count, capacity)
-			}
-
-			if action.Action == nil || action.Amount == nil {
-				continue
-			}
-
-			switch *action.Action {
-			case agonesv1.GameServerPriorityIncrement:
-				if count+*action.Amount > capacity {
-					return false
-				}
-			case agonesv1.GameServerPriorityDecrement:
-				if *action.Amount > count {
-					return false
-				}
-			}
-		}
-
-		for name, action := range gsa.Spec.Lists {
-			status, ok := gs.Status.Lists[name]
-			if !ok {
-				continue
-			}
-
-			if len(action.AddValues) == 0 {
-				continue
-			}
-
-			capacity := status.Capacity
-			if action.Capacity != nil {
-				capacity = *action.Capacity
-			}
-
-			needed := 0
-			seen := make(map[string]bool, len(action.AddValues))
-			for _, v := range action.AddValues {
-				if seen[v] {
-					continue
-				}
-				seen[v] = true
-				if slices.Contains(status.Values, v) {
-					continue
-				}
-				needed++
-			}
-
-			if int64(len(status.Values)+needed) > capacity {
-				return false
-			}
-		}
-
-		return true
-	}
 }
