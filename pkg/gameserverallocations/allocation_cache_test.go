@@ -854,6 +854,93 @@ func TestAllocationCacheReorderGameServerAfterAllocation(t *testing.T) {
 	}
 }
 
+func TestAllocationCacheGetGameServer(t *testing.T) {
+	t.Parallel()
+
+	a, _ := newFakeAllocator()
+	gs := &agonesv1.GameServer{
+		ObjectMeta: metav1.ObjectMeta{Name: "gs1", Namespace: defaultNs, UID: "1", ResourceVersion: "1"},
+		Status:     agonesv1.GameServerStatus{State: agonesv1.GameServerStateReady},
+	}
+
+	_, ok := a.allocationCache.GetGameServer("default/gs1")
+	assert.False(t, ok)
+
+	a.allocationCache.AddGameServer(gs)
+
+	got, ok := a.allocationCache.GetGameServer("default/gs1")
+	require.True(t, ok)
+	assert.Equal(t, gs, got)
+
+	_, ok = a.allocationCache.GetGameServer("default/gs2")
+	assert.False(t, ok)
+}
+
+func TestAllocationCacheRefreshGameServer(t *testing.T) {
+	t.Parallel()
+
+	const key = "default/gs1"
+	now := metav1.Now()
+	newGs := func(resourceVersion string, state agonesv1.GameServerState) *agonesv1.GameServer {
+		return &agonesv1.GameServer{
+			ObjectMeta: metav1.ObjectMeta{Name: "gs1", Namespace: defaultNs, UID: "1", ResourceVersion: resourceVersion},
+			Status:     agonesv1.GameServerStatus{State: state},
+		}
+	}
+
+	testCases := map[string]struct {
+		cached   *agonesv1.GameServer
+		live     *agonesv1.GameServer
+		wantInRV string
+	}{
+		"an allocatable GameServer replaces the cached one": {
+			cached:   newGs("1", agonesv1.GameServerStateAllocated),
+			live:     newGs("2", agonesv1.GameServerStateAllocated),
+			wantInRV: "2",
+		},
+		"an allocatable GameServer is added when not cached": {
+			live:     newGs("2", agonesv1.GameServerStateReady),
+			wantInRV: "2",
+		},
+		"a GameServer that is no longer allocatable is removed": {
+			cached: newGs("1", agonesv1.GameServerStateAllocated),
+			live:   newGs("2", agonesv1.GameServerStateShutdown),
+		},
+		"a GameServer being deleted is removed": {
+			cached: newGs("1", agonesv1.GameServerStateReady),
+			live: func() *agonesv1.GameServer {
+				gs := newGs("2", agonesv1.GameServerStateReady)
+				gs.ObjectMeta.DeletionTimestamp = &now
+				return gs
+			}(),
+		},
+		"a GameServer that is not allocatable and not cached is a no-op": {
+			live: newGs("2", agonesv1.GameServerStateShutdown),
+		},
+	}
+
+	for name, tc := range testCases {
+		t.Run(name, func(t *testing.T) {
+			t.Parallel()
+
+			a, _ := newFakeAllocator()
+			if tc.cached != nil {
+				a.allocationCache.AddGameServer(tc.cached)
+			}
+
+			a.allocationCache.refreshGameServer(tc.live)
+
+			got, ok := a.allocationCache.GetGameServer(key)
+			if tc.wantInRV == "" {
+				assert.False(t, ok)
+				return
+			}
+			require.True(t, ok)
+			assert.Equal(t, tc.wantInRV, got.ObjectMeta.ResourceVersion)
+		})
+	}
+}
+
 func newFakeAllocationCache() (*AllocationCache, agtesting.Mocks) {
 	m := agtesting.NewMocks()
 	cache := NewAllocationCache(m.AgonesInformerFactory.Agones().V1().GameServers(), gameservers.NewPerNodeCounter(m.KubeInformerFactory, m.AgonesInformerFactory), healthcheck.NewHandler())

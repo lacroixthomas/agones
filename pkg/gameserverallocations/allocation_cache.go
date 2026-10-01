@@ -152,6 +152,23 @@ func (c *AllocationCache) AddGameServer(gs *agonesv1.GameServer) {
 	c.cache.Store(key, gs)
 }
 
+// refreshGameServer updates the cache with the live version of the GameServer read from the API server:
+// it is stored if it is still allocatable, and removed from the cache otherwise
+func (c *AllocationCache) refreshGameServer(gs *agonesv1.GameServer) {
+	key, _ := cache.MetaNamespaceKeyFunc(gs)
+
+	if !gs.IsBeingDeleted() && c.matcher(gs) {
+		c.cache.Store(key, gs)
+		return
+	}
+	c.cache.Delete(key)
+}
+
+// GetGameServer returns the cached GameServer for the given key, along with a boolean indicating if it was found
+func (c *AllocationCache) GetGameServer(key string) (*agonesv1.GameServer, bool) {
+	return c.cache.Load(key)
+}
+
 // getGameServers returns a list of game servers in the cache.
 func (c *AllocationCache) getGameServers() []*agonesv1.GameServer {
 	length := c.cache.Len()

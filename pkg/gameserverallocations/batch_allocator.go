@@ -29,132 +29,60 @@ import (
 	corev1 "k8s.io/api/core/v1"
 	k8serrors "k8s.io/apimachinery/pkg/api/errors"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
+	"k8s.io/client-go/tools/cache"
+	"k8s.io/client-go/util/workqueue"
 )
 
-// batchResponses is an async list of responses for matching requests
-type batchResponses struct {
-	counterErrors error
-	listErrors    error
-	responses     []response
-}
+// Batch allocation flow
+//
+//	 requests (c.pendingRequests)
+//	            │
+//	            ▼
+//	┌───────────────────────────────┐  reads   ┌──────────────────────┐
+//	│ LISTENER (single goroutine)   │◀─────────│ ALLOCATION CACHE     │
+//	│ ListenAndBatchAllocate        │          │ sorted GameServers   │
+//	│  1. sortedGameServers         │          └──────────▲───────────┘
+//	│  2. findGameServerForBatch... │                     │
+//	│  3. plan on a local copy      │                     │ AddGameServer
+//	│  4. keep the list sorted      │                     │ (or refresh on conflict)
+//	└───────┬───────────────┬───────┘                     │
+//	        │ pending.add   │ submit() when idle,         │
+//	        │ (key, req)    │ or after N requests         │
+//	        ▼               ▼                             │
+//	┌──────────────┐  ┌───────────┐  Get   ┌─────────────┴─────────────────┐
+//	│ PENDING      │  │ WORKQUEUE │───────▶│ UPDATE WORKERS (N goroutines) │
+//	│ key → reqs   │  │ one key   │        │ runUpdateWorker               │
+//	│ + projection │◀─│ at a time │        │  take(key) → updateGameServer │
+//	└──────────────┘  └───────────┘        │  applyRequests on cached GS   │
+//	      take(key)                        │  ONE Update() for all of them │
+//	                                       └───────────────┬───────────────┘
+//	                                                       │
+//	                                                       ▼
+//	                                      req.response <- GameServer or error
+//	                                      (conflict: error, the caller retries)
+//
+// Requests planned on the same GameServer while a worker updates it are merged into its next update.
 
-// batchAllocationUpdateWorkers tries to update each newly allocated gs with the last state.
-// If the update fails because of a version conflict, all allocations that were applied onto
-// a gs will receive an error, thus being available for retries.
-func (c *Allocator) batchAllocationUpdateWorkers(ctx context.Context, workerCount int) chan<- batchResponses {
-	batchUpdateQueue := make(chan batchResponses)
-
-	for range workerCount {
-		go func() {
-			for {
-				select {
-				case batchRes := <-batchUpdateQueue:
-					if len(batchRes.responses) > 0 {
-						lastGsState := batchRes.responses[len(batchRes.responses)-1].gs
-
-						var propagatedErr error
-						updatedGs, updateErr := c.gameServerGetter.GameServers(lastGsState.ObjectMeta.Namespace).Update(ctx, lastGsState, metav1.UpdateOptions{})
-						if updateErr != nil {
-							if !k8serrors.IsConflict(updateErr) {
-								// since we could not allocate, we should put it back
-								// but not if it's a conflict, as the cache is no longer up to date, and
-								// we should wait for it to get updated with fresh info.
-								c.allocationCache.AddGameServer(lastGsState)
-								propagatedErr = updateErr
-							} else {
-								propagatedErr = goErrors.Join(ErrGameServerUpdateConflict, updateErr)
-							}
-						} else {
-							c.allocationCache.AddGameServer(updatedGs)
-
-							if batchRes.counterErrors != nil {
-								c.recorder.Event(updatedGs, corev1.EventTypeWarning, "CounterActionError", batchRes.counterErrors.Error())
-							}
-							if batchRes.listErrors != nil {
-								c.recorder.Event(updatedGs, corev1.EventTypeWarning, "ListActionError", batchRes.listErrors.Error())
-							}
-							c.recorder.Event(updatedGs, corev1.EventTypeNormal, string(updatedGs.Status.State), "Allocated")
-						}
-
-						for _, res := range batchRes.responses {
-							res.err = propagatedErr
-							res.request.response <- res
-						}
-					}
-				case <-ctx.Done():
-					return
-				}
-			}
-		}()
-	}
-
-	return batchUpdateQueue
-}
-
-// ListenAndBatchAllocate is a blocking function that runs in a loop processing allocation
-// requests in batches. Unlike ListenAndAllocate, it applies allocations locally to a
-// GameServer before batching updates — multiple allocations to the same GameServer within
-// a flush window result in a single Kubernetes update, reducing API pressure and improving
-// session packing.
+// ListenAndBatchAllocate listens for incoming allocation requests and processes them in batches
 func (c *Allocator) ListenAndBatchAllocate(ctx context.Context, updateWorkerCount int) {
-	batchUpdateQueue := c.batchAllocationUpdateWorkers(ctx, updateWorkerCount)
+	pending := newPendingAllocations()
+	queue := c.batchAllocationUpdateWorkers(ctx, updateWorkerCount, pending)
 
-	var list []*agonesv1.GameServer
-	var sortKey uint64
-	requestCount := 0
-	gsToReorderIndex := -1
-	var gsToReorder *agonesv1.GameServer
+	// candidates are the sorted GameServers the requests are planned onto. They are refreshed from the cache
+	// when the loop was idle, after maxBatchBeforeRefresh requests, or when the allocation spec changes
+	var candidates []*agonesv1.GameServer
+	// candidatesSortKey is used to determine if the candidates need to be refreshed based on the allocation request's sort key
+	var candidatesSortKey uint64
+	// plannedKeys are the GameServers planned onto since the candidates were refreshed, handed to the update workers
+	// all at once, so that each gets a single update for all of them (duplicates are collapsed by the queue)
+	var plannedKeys []string
 
-	batchResponsesPerGs := make(map[string]batchResponses)
-
-	flush := func() {
-		if len(batchResponsesPerGs) > 0 {
-			for _, batchRes := range batchResponsesPerGs {
-				batchUpdateQueue <- batchRes
-			}
-			batchResponsesPerGs = make(map[string]batchResponses)
+	// submit hands the planned GameServers to the update workers and clears the plannedKeys slice
+	submit := func() {
+		for _, key := range plannedKeys {
+			queue.Add(key)
 		}
-
-		list = nil
-		requestCount = 0
-		gsToReorderIndex = -1
-		gsToReorder = nil
-	}
-
-	checkSortKey := func(gsa *allocationv1.GameServerAllocation) {
-		if runtime.FeatureEnabled(runtime.FeatureCountsAndLists) {
-			newSortKey, err := gsa.SortKey()
-			if err != nil {
-				c.baseLogger.WithError(err).Warn("error getting sortKey for GameServerAllocationSpec")
-			}
-			if sortKey == 0 {
-				sortKey = newSortKey
-			}
-
-			if newSortKey != sortKey {
-				sortKey = newSortKey
-				flush()
-			}
-		}
-	}
-
-	checkRefreshList := func(gsa *allocationv1.GameServerAllocation) {
-		if requestCount >= maxBatchBeforeRefresh {
-			flush()
-		}
-		requestCount++
-
-		checkSortKey(gsa)
-
-		if list == nil {
-			if !runtime.FeatureEnabled(runtime.FeatureCountsAndLists) || gsa.Spec.Scheduling == apis.Packed {
-				list = c.allocationCache.ListSortedGameServers(gsa)
-			} else {
-				list = c.allocationCache.ListSortedGameServersPriorities(gsa)
-			}
-		} else if gsToReorderIndex >= 0 {
-			c.allocationCache.ReorderGameServerAfterAllocation(list, gsToReorderIndex, gsToReorder, gsa.Spec.Priorities, gsa.Spec.Scheduling)
-		}
+		plannedKeys = plannedKeys[:0]
 	}
 
 	for {
@@ -165,58 +93,162 @@ func (c *Allocator) ListenAndBatchAllocate(ctx context.Context, updateWorkerCoun
 				continue
 			}
 
-			checkRefreshList(req.gsa)
+			// determine if we need to refresh the candidates based on the sort key, the number of planned requests, or if there are no candidates yet
+			reqSortKey := c.batchSortKey(req.gsa)
+			if candidates == nil || len(plannedKeys) >= maxBatchBeforeRefresh || reqSortKey != candidatesSortKey {
+				submit()
+				candidates = c.sortedGameServers(req.gsa, pending)
+				candidatesSortKey = reqSortKey
+			}
 
-			foundGs, foundGsIndex, err := c.findGameServerForBatchAllocation(req.gsa, list)
+			// find a suitable GameServer for the current allocation request
+			gs, index, err := c.findGameServerForBatchAllocation(req.gsa, candidates)
 			if err != nil {
 				req.response <- response{request: req, gs: nil, err: err}
 				continue
 			}
 
-			existingBatch, alreadyAllocated := batchResponsesPerGs[string(foundGs.UID)]
-			if !alreadyAllocated {
-				if removeErr := c.allocationCache.RemoveGameServer(foundGs); removeErr != nil {
-					removeErr = c.errs.Wrap(removeErr, "error removing gameserver from cache")
-					req.response <- response{request: req, gs: nil, err: removeErr}
-					// Setting the entry to nil to mark the gameserver as errored/removed from the list
-					list[foundGsIndex] = nil
-					continue
-				}
+			// make a deep copy of the GameServer to apply the allocation locally
+			allocated := gs.DeepCopy()
+			applyErr, _, _ := c.applyAllocationToLocalGameServer(req.gsa.Spec.MetaPatch, allocated, req.gsa)
+			if applyErr != nil {
+				req.response <- response{request: req, gs: nil, err: applyErr}
+				continue
 			}
 
-			gsToReorder = foundGs.DeepCopy()
-			gsToReorderIndex = foundGsIndex
-			applyErr, counterErrors, listErrors := c.applyAllocationToLocalGameServer(req.gsa.Spec.MetaPatch, gsToReorder, req.gsa)
-			if applyErr == nil {
-				if alreadyAllocated {
-					existingBatch.responses = append(existingBatch.responses, response{request: req, gs: gsToReorder.DeepCopy(), err: nil})
-					existingBatch.counterErrors = goErrors.Join(existingBatch.counterErrors, counterErrors)
-					existingBatch.listErrors = goErrors.Join(existingBatch.listErrors, listErrors)
-					batchResponsesPerGs[string(gsToReorder.UID)] = existingBatch
-				} else {
-					batchResponsesPerGs[string(gsToReorder.UID)] = batchResponses{
-						responses:     []response{{request: req, gs: gsToReorder.DeepCopy(), err: nil}},
-						counterErrors: counterErrors,
-						listErrors:    listErrors,
-					}
-				}
-			} else {
-				req.response <- response{request: req, gs: nil, err: applyErr}
-			}
+			// add the planned GameServer to the pending allocations and record its key for the update workers
+			key, _ := cache.MetaNamespaceKeyFunc(gs)
+			pending.add(key, req, allocated)
+			plannedKeys = append(plannedKeys, key)
+
+			// reorder the candidates after applying the allocation to keep them sorted for the next request
+			c.allocationCache.ReorderGameServerAfterAllocation(candidates, index, allocated, req.gsa.Spec.Priorities, req.gsa.Spec.Scheduling)
 
 		case <-ctx.Done():
 			return
 
 		default:
-			flush()
+			// idle: hand the planned GameServers to the update workers, clear the candidates, and wait for the next batch
+			submit()
+			candidates = nil
 			time.Sleep(c.batchWaitTime)
 		}
 	}
 }
 
+// batchAllocationUpdateWorkers starts the specified number of worker goroutines that process updates for the planned GameServers
+func (c *Allocator) batchAllocationUpdateWorkers(ctx context.Context, workerCount int, pending *pendingAllocations) workqueue.TypedInterface[string] {
+	queue := workqueue.NewTyped[string]()
+	go func() {
+		<-ctx.Done()
+		queue.ShutDown()
+	}()
+
+	for range workerCount {
+		// start a new update worker goroutine
+		go c.runUpdateWorker(ctx, queue, pending)
+	}
+
+	return queue
+}
+
+// runUpdateWorker continuously processes keys from the queue, applying the pending requests to the corresponding GameServers until the queue is shut down
+func (c *Allocator) runUpdateWorker(ctx context.Context, queue workqueue.TypedInterface[string], pending *pendingAllocations) {
+	for {
+		// get the next key from the queue, along with a flag indicating if the queue is shutting down
+		key, shutdown := queue.Get()
+		if shutdown {
+			return
+		}
+
+		// process the next key from the queue by applying the pending requests to the corresponding GameServer
+		c.updateGameServer(ctx, key, pending.take(key))
+		// mark the pending requests for this key as finished and signal the queue that processing is done
+		pending.finish(key)
+		// signal the queue that processing for this key is done
+		queue.Done(key)
+	}
+}
+
+// updateGameServer applies the pending requests to the cached GameServer identified by the key and persists the changes
+// If the update fails due to a version conflict, the cache is refreshed with the live GameServer, and the requests receive an error, making them available for retries
+func (c *Allocator) updateGameServer(ctx context.Context, key string, reqs []request) {
+	// retrieve the cached GameServer by its key from the allocation cache
+	gs, ok := c.allocationCache.GetGameServer(key)
+	if !ok {
+		for _, req := range reqs {
+			req.response <- response{request: req, gs: nil, err: ErrNoGameServer}
+		}
+		return
+	}
+
+	// apply the pending requests to a copy of the cached GameServer and collect the results
+	toUpdate, applied, counterErrors, listErrors := c.applyRequests(gs, reqs)
+
+	// if no requests were successfully applied, there is nothing to update
+	if len(applied) == 0 {
+		return
+	}
+
+	// attempt to persist the changes to the GameServer in the API server
+	updatedGs, err := c.gameServerGetter.GameServers(toUpdate.ObjectMeta.Namespace).Update(ctx, toUpdate, metav1.UpdateOptions{})
+	switch {
+	// update succeeded without errors
+	case err == nil:
+		// update the cache with the successfully updated GameServer
+		c.allocationCache.AddGameServer(updatedGs)
+		c.recordAllocated(updatedGs, counterErrors, listErrors)
+
+	// update failed due to a version conflict
+	case k8serrors.IsConflict(err):
+		// refresh the cache with the live GameServer if it can be retrieved
+		live, getErr := c.gameServerGetter.GameServers(toUpdate.ObjectMeta.Namespace).Get(ctx, toUpdate.ObjectMeta.Name, metav1.GetOptions{})
+		if getErr == nil {
+			// update the cache with the live GameServer
+			c.allocationCache.refreshGameServer(live)
+		}
+		err = goErrors.Join(ErrGameServerUpdateConflict, err)
+	}
+
+	// notify all successfully applied requests of the result, including any errors encountered during the update
+	for _, res := range applied {
+		res.err = err
+		res.request.response <- res
+	}
+}
+
+// applyRequests applies each allocation request to a copy of the given GameServer
+// It returns the updated GameServer, a list of successfully applied responses, and any errors encountered while applying counters or lists
+func (c *Allocator) applyRequests(gs *agonesv1.GameServer, reqs []request) (toUpdate *agonesv1.GameServer, applied []response, counterErrors, listErrors error) {
+	toUpdate = gs.DeepCopy()
+	for _, req := range reqs {
+		switch {
+		// check if the request context has expired or if the request fits the current GameServer before applying it
+		case req.ctx.Err() != nil:
+			req.response <- response{request: req, gs: nil, err: ErrTotalTimeoutExceeded}
+
+		// request does not fit the current GameServer
+		case !requestFits(req, toUpdate):
+			req.response <- response{request: req, gs: nil, err: ErrConflictInGameServerSelection}
+
+		// request fits the current GameServer and can be applied
+		default:
+			applyErr, cErr, lErr := c.applyAllocationToLocalGameServer(req.gsa.Spec.MetaPatch, toUpdate, req.gsa)
+			if applyErr != nil {
+				req.response <- response{request: req, gs: nil, err: applyErr}
+				continue
+			}
+			counterErrors = goErrors.Join(counterErrors, cErr)
+			listErrors = goErrors.Join(listErrors, lErr)
+			applied = append(applied, response{request: req, gs: toUpdate.DeepCopy(), err: nil})
+		}
+	}
+
+	return toUpdate, applied, counterErrors, listErrors
+}
+
 // applyAllocationToLocalGameServer patches the GameServer with allocation metadata and sets
 // it to Allocated state without persisting to Kubernetes. Counter/List actions are applied
-// if FeatureCountsAndLists is enabled.
 func (c *Allocator) applyAllocationToLocalGameServer(mp allocationv1.MetaPatch, gs *agonesv1.GameServer, gsa *allocationv1.GameServerAllocation) (applyErr, counterErrors, listErrors error) {
 	ts, err := time.Now().MarshalText()
 	if err != nil {
@@ -253,9 +285,62 @@ func (c *Allocator) applyAllocationToLocalGameServer(mp allocationv1.MetaPatch, 
 	return nil, counterErrors, listErrors
 }
 
+// recordAllocated records the Allocated event of the GameServer, and any Counter or List action errors as warnings
+func (c *Allocator) recordAllocated(gs *agonesv1.GameServer, counterErrors, listErrors error) {
+	if counterErrors != nil {
+		c.recorder.Event(gs, corev1.EventTypeWarning, "CounterActionError", counterErrors.Error())
+	}
+	if listErrors != nil {
+		c.recorder.Event(gs, corev1.EventTypeWarning, "ListActionError", listErrors.Error())
+	}
+	c.recorder.Event(gs, corev1.EventTypeNormal, string(gs.Status.State), "Allocated")
+}
+
+// batchSortKey returns the sort key for the given GameServerAllocation
+func (c *Allocator) batchSortKey(gsa *allocationv1.GameServerAllocation) uint64 {
+	if !runtime.FeatureEnabled(runtime.FeatureCountsAndLists) {
+		return 0
+	}
+
+	// Get the sort key for the GameServerAllocation, which determines the order in which it should be considered for allocation
+	sortKey, err := gsa.SortKey()
+	if err != nil {
+		c.baseLogger.WithError(err).Warn("error getting sortKey for GameServerAllocationSpec")
+	}
+
+	return sortKey
+}
+
+// sortedGameServers returns the list of GameServers sorted according to the allocation strategy, with pending allocations taken into account
+func (c *Allocator) sortedGameServers(gsa *allocationv1.GameServerAllocation, pending *pendingAllocations) []*agonesv1.GameServer {
+	var list []*agonesv1.GameServer
+	if !runtime.FeatureEnabled(runtime.FeatureCountsAndLists) || gsa.Spec.Scheduling == apis.Packed {
+		list = c.allocationCache.ListSortedGameServers(gsa)
+	} else {
+		list = c.allocationCache.ListSortedGameServersPriorities(gsa)
+	}
+
+	for _, projected := range pending.projections() {
+		// find the index of the projected GameServer in the sorted list
+		i := slices.IndexFunc(list, func(gs *agonesv1.GameServer) bool {
+			return gs.ObjectMeta.Name == projected.ObjectMeta.Name && gs.ObjectMeta.Namespace == projected.ObjectMeta.Namespace
+		})
+
+		// if the projected GameServer is not found in the list, skip it
+		if i < 0 {
+			continue
+		}
+
+		// reorder the GameServer in the list based on the allocation projection
+		c.allocationCache.ReorderGameServerAfterAllocation(list, i, projected, gsa.Spec.Priorities, gsa.Spec.Scheduling)
+	}
+
+	return list
+}
+
 // findGameServerForBatchAllocation finds an optimal GameServer for the batch allocator
-// Returns the first GameServer that matches the selectors and fits the allocation criteria, along with its index in the list
-// If no suitable GameServer is found, returns an error
+// It returns the first GameServer that matches the selectors and fits the allocation criteria, along with its index in the list
+// If no suitable GameServer is found, it returns an error
 func (c *Allocator) findGameServerForBatchAllocation(gsa *allocationv1.GameServerAllocation, list []*agonesv1.GameServer) (*agonesv1.GameServer, int, error) {
 	type result struct {
 		gs    *agonesv1.GameServer
@@ -266,10 +351,6 @@ func (c *Allocator) findGameServerForBatchAllocation(gsa *allocationv1.GameServe
 
 	var loop func(list []*agonesv1.GameServer, f func(i int, gs *agonesv1.GameServer))
 
-	// packed is forward looping, distributed is random looping
-	// TODO: this duplicates the scheduling switch in findGameServerForAllocation (find.go)
-	// Once FeatureCountsAndLists is stable, batch allocation should replace that function and this
-	// block should move to find.go instead of being duplicated here.
 	// nolint:dupl // Linter errors on lines are duplicate of findGameServerForAllocation in find.go
 	switch gsa.Spec.Scheduling {
 	case apis.Packed:
@@ -354,8 +435,26 @@ func (c *Allocator) findGameServerForBatchAllocation(gsa *allocationv1.GameServe
 	return nil, 0, ErrNoGameServer
 }
 
-// counterAndListActionsFit returns a function that checks if a GameServer can
-// accommodate all Counter andList actions specified in the GameServerAllocation
+// requestFits returns true if the request can still be applied onto the GameServer.
+func requestFits(req request, gs *agonesv1.GameServer) bool {
+	if gs.IsBeingDeleted() || !readyOrAllocatedGameServerMatcher(gs) {
+		return false
+	}
+
+	if !slices.ContainsFunc(req.gsa.Spec.Selectors, func(sel allocationv1.GameServerSelector) bool { return sel.Matches(gs) }) {
+		return false
+	}
+
+	if runtime.FeatureEnabled(runtime.FeatureCountsAndLists) {
+		if fit := counterAndListActionsFit(req.gsa); fit != nil && !fit(gs) {
+			return false
+		}
+	}
+
+	return true
+}
+
+// counterAndListActionsFit returns a function that checks if a GameServer can accommodate all Counter and List actions specified in the GameServerAllocation
 func counterAndListActionsFit(gsa *allocationv1.GameServerAllocation) func(*agonesv1.GameServer) bool {
 	if len(gsa.Spec.Counters) == 0 && len(gsa.Spec.Lists) == 0 {
 		return nil
